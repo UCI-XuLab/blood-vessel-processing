@@ -32,6 +32,14 @@ Where follow-up work happens. It is free to differ from the archive:
 | `threshold` | hysteresis thresholding and mask clean-up |
 | `metrics` | Dice, Jaccard, precision, recall, clDice, area fractions, agreement by vessel calibre |
 | `sweep` | threshold sensitivity analysis |
+| `storage` | chunked OME-Zarr conversion for volumes larger than memory |
+| `correct` | lightsheet destriping and depth attenuation correction |
+| `chunked` | running filters over large volumes with correctly sized halos |
+| `synth` | synthetic vasculature with a simulated lightsheet acquisition |
+| `ensemble` | combining segmentations and mapping where they disagree |
+| `benchmark` | scoring a segmenter against phantoms with known ground truth |
+| `qc` | first-contact inspection of a new acquisition |
+| `validate` | accuracy on real data without dense annotation |
 
 The main differences: sigmas are in physical units rather than voxels, so anisotropic data is handled correctly; the vesselness response has an absolute scale rather than being rescaled per image, so one threshold means the same thing in both channels and across slices; and the metric set drops four measures that carry little information on binary masks in favour of `clDice`, which compares centrelines and so registers connectivity disagreements that voxel overlap misses.
 
@@ -52,6 +60,16 @@ jupyter lab
 
 The install is optional — each notebook locates the repository root and adds it to `sys.path` on its own, so the notebooks also run from a plain checkout.
 
+## Benchmarks
+
+```bash
+python scripts/benchmark_pipeline.py
+```
+
+Reproduces every accuracy figure quoted for the active pipeline, against phantom
+ground truth. Deterministic, so a change in the numbers means a change in the
+pipeline.
+
 ## Tests
 
 ```bash
@@ -59,4 +77,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-351 tests. The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires `velazquez_rivera_2025` to produce bit-identical results; it also hashes that package against a manifest so accidental edits to the published implementation fail loudly. The active package is checked against the properties it claims rather than against history.
+426 tests. The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires `velazquez_rivera_2025` to produce bit-identical results; it also hashes that package against a manifest so accidental edits to the published implementation fail loudly. The active package is checked against the properties it claims rather than against history.

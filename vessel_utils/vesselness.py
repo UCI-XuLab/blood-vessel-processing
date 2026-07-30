@@ -64,6 +64,13 @@ def hessian_eigenvalues(image, sigma, spacing=None, dtype=np.float32):
     interior.
     """
     image = np.asarray(image, dtype=dtype)
+    if not np.isfinite(image).all():
+        # A single NaN otherwise spreads across the whole Gaussian footprint.
+        # The reference implementation additionally zeroes eigenvalues below an
+        # absolute 1e-4; that is deliberately not ported, because it is a
+        # threshold on intensity units and would mean different things on data
+        # scaled differently from theirs.
+        image = np.nan_to_num(image, nan=0.0, posinf=0.0, neginf=0.0)
     ndim = image.ndim
     if ndim not in (2, 3):
         raise ValueError(f"expected a 2D or 3D image, got {ndim}D")

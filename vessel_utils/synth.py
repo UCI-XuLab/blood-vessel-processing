@@ -132,12 +132,17 @@ def vascular_tree(extent, root_radius=None, min_radius=1.5, n_levels=7,
         wander = _perpendicular(direction, rng) * tortuosity * length
         end = point + direction * length + wander
 
-        # Taper toward the daughters' combined radius.
         split = 0.5 + rng.uniform(-asymmetry, asymmetry)
         child_a = radius * split ** (1.0 / murray_exponent)
         child_b = radius * (1.0 - split) ** (1.0 / murray_exponent)
-        segments.append(Segment(tuple(point), tuple(end), radius,
-                                max(child_a, child_b)))
+
+        # Uniform radius along the segment, stepping down only at the
+        # bifurcation. Tapering the parent toward max(child_a, child_b) would
+        # match the larger daughter and leave an exact discontinuity at the
+        # smaller one, biasing the rendered calibre near every asymmetric
+        # bifurcation toward the larger sibling — which matters here because
+        # recall-by-calibre is the measurement this phantom exists to support.
+        segments.append(Segment(tuple(point), tuple(end), radius, radius))
 
         forward = _unit(end - point)
         axis = _perpendicular(forward, rng)

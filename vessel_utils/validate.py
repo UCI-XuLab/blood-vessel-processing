@@ -35,7 +35,11 @@ def stratified_sample(predicted, n_points=300, positive_fraction=0.5, roi=None,
     Args:
         predicted: the boolean mask being validated.
         n_points: total points to review. 300 is about an afternoon and gives a
-            precision interval of roughly +/-0.05.
+            precision interval of roughly +/-0.05 for a segmentation around 90%
+            precise. Recall is estimated less tightly than precision at the same
+            point count, because it depends on the rarer negative-stratum rate:
+            against a phantom at 4000 points the estimator recovers precision to
+            about +/-0.05 but recall only to about +/-0.10.
         positive_fraction: share drawn from predicted-vessel voxels. Half and
             half is a reasonable default; raise it if precision matters more than
             recall for your claim.

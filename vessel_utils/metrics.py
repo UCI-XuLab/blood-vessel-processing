@@ -8,8 +8,11 @@ percent vessel area fraction), four of them carry almost no information:
   - `rand_index` on two classes is pixel accuracy, which is dominated by the
     empty background. Two completely unrelated masks still score about 0.91, so
     nearly its whole range is spent on the fact that most of a slice is not vessel.
-  - `ssim` is built for continuous perceptual images; on thresholded masks it
-    largely restates area agreement, scoring about 0.60 for unrelated masks.
+  - `ssim` is built for continuous perceptual images. On thresholded masks its
+    value depends strongly on the spatial structure rather than on agreement:
+    measured on unrelated mask pairs it ranges from near 0 for uncorrelated
+    speckle to above 0.8 for realistically structured vasculature. Either way it
+    fails to separate unrelated masks from related ones, which is the job.
 
 What is kept here is Dice, Jaccard, precision and recall — which do span their
 range — plus `cl_dice`, which compares skeletons instead of voxels and so

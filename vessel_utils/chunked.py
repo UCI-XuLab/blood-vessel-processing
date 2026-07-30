@@ -9,8 +9,10 @@ connectivity that clDice and any skeleton-based measure depend on.
 
 The fix is to give each chunk a halo of neighbouring data, compute, then discard
 the halo. `dask.array.map_overlap` does the bookkeeping; what this module adds is
-choosing the halo correctly from the filter's actual reach in physical units, and
-refusing to run when the halo would be too small.
+choosing the halo correctly from the filter's actual reach in physical units, so
+it is right by construction rather than by being checked. The one guard that does
+exist rejects a halo too *large* for the chunks, where each block would be mostly
+halo and the work would be dominated by recomputation.
 """
 
 import numpy as np

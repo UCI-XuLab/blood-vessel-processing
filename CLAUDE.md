@@ -44,6 +44,11 @@ Both packages are split by pipeline stage, so an import block reads as a descrip
 | [storage.py](vessel_utils/storage.py) | `plane_series_to_zarr`, `open_volume`, `write_volume`, `read_spacing` |
 | [correct.py](vessel_utils/correct.py) | `destripe`, `tissue_mask`, `depth_profile`, `correct_depth_attenuation` |
 | [chunked.py](vessel_utils/chunked.py) | `overlap_depth`, `map_blocks_with_halo`, `apply_vesselness` |
+| [synth.py](vessel_utils/synth.py) | `vascular_tree`, `render_tree`, `simulate_acquisition`, `phantom` |
+| [ensemble.py](vessel_utils/ensemble.py) | `consensus`, `disagreement_map`, `pairwise_agreement`, `redundancy` |
+| [benchmark.py](vessel_utils/benchmark.py) | `score_segmentation`, `run_benchmark`, `sweep_condition`, `summarise` |
+| [qc.py](vessel_utils/qc.py) | `intake_report`, `resolvability`, `compare_channels`, `estimate_attenuation` |
+| [validate.py](vessel_utils/validate.py) | `stratified_sample`, `estimate_accuracy`, `agreement_by_depth` |
 | [vesselness.py](vessel_utils/vesselness.py) | `jerman_vesselness`, `hessian_eigenvalues`, `max_eigenvalue` |
 | [threshold.py](vessel_utils/threshold.py) | `hysteresis_threshold`, `otsu_threshold`, `clean_mask`, `segment` |
 | [metrics.py](vessel_utils/metrics.py) | `dice`, `jaccard`, `precision`, `recall`, `cl_dice`, `area_fraction`, `agreement`, `agreement_by_calibre` |
@@ -55,7 +60,7 @@ Three deliberate departures, each addressing a consistency problem in the archiv
 
 - **Bounded response instead of per-image rescale.** `itk.RescaleIntensityImageFilter` stretches each image's own min/max across 0–255, so the archive's `thresh=230` is a *relative* criterion — it means something different in every image, and in particular something different in each of the two channels being compared, which lands directly on precision vs recall as a methodological asymmetry. Jerman's response is bounded in [0,1] by construction. Pass `reference_lambda` (see `max_eigenvalue`) to remove the last per-image dependence in the tau regularisation.
 - **Physical scales.** Sigmas are in µm when `spacing` is supplied. The archive runs on raw arrays at implicit 1×1 spacing, which on anisotropic lightsheet data searches different vessel calibres along different axes.
-- **A trimmed metric set.** Of the archive's eight metrics, `mean_squared_error` and `hamming` are provably the same number on binary masks, `rand_index` is pixel accuracy (two *unrelated* masks still score ~0.91), and `ssim` scores ~0.60 for unrelated masks. The active package keeps Dice, Jaccard, precision and recall, and adds `cl_dice`, which compares skeletons and so notices connectivity disagreements that voxel overlap misses.
+- **A trimmed metric set.** Of the archive's eight metrics, `mean_squared_error` and `hamming` are provably the same number on binary masks, `rand_index` is pixel accuracy (two *unrelated* masks still score ~0.91), and `ssim` on binary masks reflects spatial structure more than agreement — unrelated mask pairs measure anywhere from near 0 for uncorrelated speckle to above 0.8 for realistically structured vasculature. The active package keeps Dice, Jaccard, precision and recall, and adds `cl_dice`, which compares skeletons and so notices connectivity disagreements that voxel overlap misses.
 
 `vessel_utils.metrics.jaccard` is named differently from the archive's `iou` on purpose — it binarises first, so it agrees with the archive on boolean input and is simply correct on numeric input.
 
