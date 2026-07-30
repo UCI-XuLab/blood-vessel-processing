@@ -12,14 +12,19 @@ one of them has to be applied 27 times, and today the copies have already drifte
 
 ## Evidence
 
-Every top-level `def` in every notebook was parsed and its AST hashed
-(docstrings included, then compared again with them stripped). The drift is far
-smaller than the file count suggests:
+Every top-level `def` in every notebook was parsed and its AST hashed. The
+"variants" column below counts **AST-normalized** variants: docstrings are
+included (they are AST string constants) but comments are not, so two copies
+differing only in a trailing `#` line collapse to one entry. Raw-source variant
+counts are higher in two places, noted in the table.
+
+The drift is far smaller than the file count suggests:
 
 | function | notebooks defining it | distinct variants | nature of the difference |
 | --- | --- | --- | --- |
 | `read_tif` | 27 | 1 | identical |
-| `auto_contrast`, `get_brain_mask` | 26 | 1 | identical |
+| `auto_contrast` | 26 | 1 | identical |
+| `get_brain_mask` | 26 | 1 | identical code; 2 raw-source variants, differing only in two trailing commented-out lines |
 | `dice_coefficient`, `iou`, `precision`, `recall`, `rand_index` | 25 | 1 | identical |
 | `load_channels`, `show` | 21 | 1 | identical |
 | `n4_bias_correction`, `preprocess_image` | 9 | 1 | identical |
@@ -29,7 +34,7 @@ smaller than the file count suggests:
 | `save_figure` | 26 | 2 | docstring only |
 | `process_vessels` | 26 | 2 | docstring only |
 | `gamma_correction` | 26 | 2 | one is a strict superset of the other |
-| `detect_vessels` | 26 | 5 | docstrings, plus how α/β/γ are supplied |
+| `detect_vessels` | 26 | 5 | docstrings, plus how α/β/γ are supplied; 6 raw-source variants, the extra split being one comment string |
 
 `detect_vessels` holds the only behavioural difference in the entire set. Where
 `ALPHA`/`BETA`/`GAMMA` constants exist they are `0.5`/`0.5`/`5.0` in all 20
@@ -135,6 +140,11 @@ silently invalidate the published numbers.
 The notebooks cannot execute here: paths are hardcoded to `/media/data/u01/...`
 on the lab's Linux workstation and the imaging data is not in the repository.
 Equivalence is therefore established structurally.
+
+Note that the table above informs the design but is not what the tests rely on.
+`tests/baseline.py` deduplicates by hashing **raw source text**, not the AST, so
+the equivalence suite exercises all 6 `detect_vessels` and both `get_brain_mask`
+raw variants — a miscount in this table cannot cause a variant to go untested.
 
 **`tests/test_equivalence.py`** — for each helper, retrieve *every* original
 variant from git at the pre-refactor commit, `exec` it in an isolated namespace,
