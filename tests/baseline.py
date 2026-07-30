@@ -1,6 +1,6 @@
 """Recover the pre-refactor helper functions straight out of git history.
 
-Every helper now living in `vessel_utils` used to be defined inline in each
+Every helper now living in `velazquez_rivera_2025` used to be defined inline in each
 notebook. This module reads those notebooks as they were at
 `BASELINE_REV` — the last commit before the extraction — and rebuilds one
 namespace per notebook containing exactly the functions that notebook defined.
@@ -15,7 +15,7 @@ import hashlib
 import json
 import subprocess
 
-# Last commit before the vessel_utils extraction ("Update README.md").
+# Last commit before the velazquez_rivera_2025 extraction ("Update README.md").
 BASELINE_REV = "658304dddb64c35688277be05a7ac34517d3d156"
 
 # Imports the notebooks make before defining their helpers. Recreated here so the
@@ -46,7 +46,7 @@ from skimage.morphology import (binary_closing, disk, medial_axis,
 from skimage.measure import label, regionprops
 """
 
-# Defined inline in the notebooks but deliberately not carried into vessel_utils.
+# Defined inline in the notebooks but deliberately not carried into velazquez_rivera_2025.
 EXCLUDED = {
     "preprocess_image",  # dead code in all 9 notebooks; would raise TypeError if called
     "run_test",          # notebook-local: closes over `filepath` and slice-specific thresholds

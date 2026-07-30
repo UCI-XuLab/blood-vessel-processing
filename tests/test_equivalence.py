@@ -1,4 +1,4 @@
-"""Prove `vessel_utils` computes exactly what the notebooks used to compute.
+"""Prove `velazquez_rivera_2025` computes exactly what the notebooks used to compute.
 
 For every helper, every distinct implementation found in the notebooks at the
 pre-refactor commit is executed side by side with the shared version on the same
@@ -16,7 +16,7 @@ import io as _io
 import numpy as np
 import pytest
 
-import vessel_utils
+import velazquez_rivera_2025 as archive
 from tests import baseline
 
 SEED = 20260729
@@ -77,7 +77,7 @@ def mask_pairs():
 
 @pytest.mark.parametrize("name", METRIC_NAMES)
 def test_metrics_match_baseline(name):
-    shared = getattr(vessel_utils, name)
+    shared = getattr(archive, name)
     for digest, original, _source, path in baseline.variants(name):
         for label, a, b in mask_pairs():
             assert_same(shared(a, b), original(a, b),
@@ -92,14 +92,14 @@ def test_iou_is_dtype_sensitive_and_stays_that_way():
     deliberately — binarising inside `iou` would change reported numbers.
     """
     full = np.ones((8, 8), dtype=bool)
-    assert vessel_utils.iou(full, full) == pytest.approx(1.0, abs=1e-9)
+    assert archive.iou(full, full) == pytest.approx(1.0, abs=1e-9)
     # Same masks as float: intersection 64, "union" 128.
-    assert vessel_utils.iou(full.astype(float), full.astype(float)) == \
+    assert archive.iou(full.astype(float), full.astype(float)) == \
         pytest.approx(0.5, abs=1e-9)
 
     # The dead `union == 0` branch still never fires; epsilon carries the case.
     empty = np.zeros((8, 8), dtype=bool)
-    assert vessel_utils.iou(empty, empty) == pytest.approx(1.0, abs=1e-9)
+    assert archive.iou(empty, empty) == pytest.approx(1.0, abs=1e-9)
 
 
 # --------------------------------------------------------------------------
@@ -119,7 +119,7 @@ def test_gamma_correction_matches_baseline(variant):
     for label, image in images:
         for gamma in (1.0, 2.0, 0.5):
             assert_same(
-                vessel_utils.gamma_correction(image.copy(), gamma=gamma),
+                archive.gamma_correction(image.copy(), gamma=gamma),
                 original(image.copy(), gamma=gamma),
                 f"{context} on {label} gamma={gamma}",
             )
@@ -130,7 +130,7 @@ def test_gamma_correction_matches_baseline(variant):
         image = (rng().random((32, 32)) * 1000).astype(np.float32)
         for min_value, max_value in [(None, 2000.0), (100.0, None), (100.0, 800.0)]:
             assert_same(
-                vessel_utils.gamma_correction(image.copy(), gamma=2.0,
+                archive.gamma_correction(image.copy(), gamma=2.0,
                                               min_value=min_value, max_value=max_value),
                 original(image.copy(), gamma=2.0,
                          min_value=min_value, max_value=max_value),
@@ -146,7 +146,7 @@ def test_gamma_correction_superset_reduces_to_short_variant():
     assert short, "expected a baseline variant without min_value/max_value"
     for digest, original, _source, path in short:
         assert_same(
-            vessel_utils.gamma_correction(image.copy(), gamma=2.0),
+            archive.gamma_correction(image.copy(), gamma=2.0),
             original(image.copy(), gamma=2.0),
             f"gamma_correction short form [{digest} from {path}]",
         )
@@ -165,7 +165,7 @@ def test_auto_contrast_matches_baseline(variant):
         # alpha=None exercises the dtype-derived scaling path.
         for alpha in (None, 0.5, 1.5, 0.02):
             assert_same(
-                vessel_utils.auto_contrast(image.copy(), alpha=alpha),
+                archive.auto_contrast(image.copy(), alpha=alpha),
                 original(image.copy(), alpha=alpha),
                 f"{context} on {label} alpha={alpha}",
             )
@@ -176,7 +176,7 @@ def test_histogram_equalization_matches_baseline(variant):
     digest, original, _source, path = variant
     image = (rng().random((32, 32)) * 255).astype(np.uint8)
     assert_same(
-        vessel_utils.histogram_equalization(image.copy()),
+        archive.histogram_equalization(image.copy()),
         original(image.copy()),
         f"histogram_equalization [{digest} from {path}]",
     )
@@ -188,7 +188,7 @@ def test_compute_average_image_matches_baseline(variant):
     r = rng()
     stack = [(r.random((16, 16)) * 500).astype(np.uint16) for _ in range(5)]
     assert_same(
-        vessel_utils.compute_average_image(list(stack)),
+        archive.compute_average_image(list(stack)),
         original(list(stack)),
         f"compute_average_image [{digest} from {path}]",
     )
@@ -205,7 +205,7 @@ def test_n4_bias_correction_matches_baseline(variant):
     # shrink_factor 2 and 15 are the values the notebooks actually pass.
     for shrink_factor in (2, 15):
         assert_same(
-            vessel_utils.n4_bias_correction(image.copy(), mask.copy(),
+            archive.n4_bias_correction(image.copy(), mask.copy(),
                                             shrink_factor=shrink_factor),
             original(image.copy(), mask.copy(), shrink_factor=shrink_factor),
             f"{context} shrink_factor={shrink_factor}",
@@ -221,7 +221,7 @@ def test_n4_bias_correction_no_longer_raises_on_unshrunk_input():
     with pytest.raises(NameError):
         original(image.copy(), mask.copy(), shrink_factor=1)
 
-    result = vessel_utils.n4_bias_correction(image.copy(), mask.copy(), shrink_factor=1)
+    result = archive.n4_bias_correction(image.copy(), mask.copy(), shrink_factor=1)
     assert result.shape == image.shape
     assert np.isfinite(result).all()
 
@@ -242,7 +242,7 @@ def test_detect_vessels_matches_baseline(variant):
     image = (r.random((48, 48)) * 255).astype(np.float32)
     for sigma_max, steps in [(10.0, 10), (4.0, 3)]:
         assert_same(
-            vessel_utils.detect_vessels(image.copy(), 1.0, sigma_max, steps, **params),
+            archive.detect_vessels(image.copy(), 1.0, sigma_max, steps, **params),
             original(image.copy(), 1.0, sigma_max, steps),
             f"detect_vessels [{digest} from {path}] {params} sigma_max={sigma_max}",
         )
@@ -274,7 +274,7 @@ def test_process_vessels_matches_baseline(variant):
     ]
     for label, image, kwargs in cases:
         assert_same(
-            vessel_utils.process_vessels(image.copy(), **kwargs),
+            archive.process_vessels(image.copy(), **kwargs),
             original(image.copy(), **kwargs),
             f"{context} on {label}",
         )
@@ -283,7 +283,7 @@ def test_process_vessels_matches_baseline(variant):
 def test_process_vessels_inverts_because_objects_are_dark():
     """Polarity contract between detect_vessels and process_vessels."""
     below = np.zeros((32, 32), np.float32)
-    assert vessel_utils.process_vessels(below, thresh=230, min_size=1,
+    assert archive.process_vessels(below, thresh=230, min_size=1,
                                         area_threshold=1, smoothing=1).all()
 
 
@@ -297,7 +297,7 @@ def test_get_brain_mask_matches_baseline(variant):
     image[50:60, 50:60] = 5  # an interior hole
     for area_threshold, min_size in [(300000, 10000), (50000, 10000), (25000, 100)]:
         assert_same(
-            vessel_utils.get_brain_mask(image.copy(), area_threshold=area_threshold,
+            archive.get_brain_mask(image.copy(), area_threshold=area_threshold,
                                         min_size=min_size),
             original(image.copy(), area_threshold=area_threshold, min_size=min_size),
             f"{context} area={area_threshold} min_size={min_size}",
@@ -323,7 +323,7 @@ def test_read_tif_matches_baseline(variant, tmp_path):
     digest, original, _source, path = variant
     pattern = _write_stack(tmp_path, 1)
     target = pattern.replace("*", "slice_000")
-    assert_same(vessel_utils.read_tif(target), original(target),
+    assert_same(archive.read_tif(target), original(target),
                 f"read_tif [{digest} from {path}]")
 
 
@@ -332,7 +332,7 @@ def test_load_channel_matches_baseline(variant, tmp_path, capsys):
     digest, original, _source, path = variant
     pattern = _write_stack(tmp_path, 4)
     for idx in range(4):
-        assert_same(vessel_utils.load_channel(pattern, idx), original(pattern, idx),
+        assert_same(archive.load_channel(pattern, idx), original(pattern, idx),
                     f"load_channel [{digest} from {path}] idx={idx}")
     capsys.readouterr()
 
@@ -342,7 +342,7 @@ def test_load_channels_matches_baseline(variant, tmp_path, capsys):
     digest, original, _source, path = variant
     pattern = _write_stack(tmp_path, 6)
     for idx in range(3):
-        assert_same(vessel_utils.load_channels(pattern, idx), original(pattern, idx),
+        assert_same(archive.load_channels(pattern, idx), original(pattern, idx),
                     f"load_channels [{digest} from {path}] idx={idx}")
     capsys.readouterr()
 
@@ -352,7 +352,7 @@ def test_load_3_channels_matches_baseline(variant, tmp_path, capsys):
     digest, original, _source, path = variant
     pattern = _write_stack(tmp_path, 9)
     for idx in range(3):
-        assert_same(vessel_utils.load_3_channels(pattern, idx), original(pattern, idx),
+        assert_same(archive.load_3_channels(pattern, idx), original(pattern, idx),
                     f"load_3_channels [{digest} from {path}] idx={idx}")
     capsys.readouterr()
 
@@ -403,7 +403,7 @@ def test_show_matches_baseline(variant):
              title="a", title2="b", xlim=(2, 20), ylim=(20, 2)),
     ]
     for kwargs in cases:
-        assert render(vessel_utils.show, image, **kwargs) == \
+        assert render(archive.show, image, **kwargs) == \
                render(original, image, **kwargs), f"{context} {sorted(kwargs)}"
 
 
@@ -413,7 +413,7 @@ def test_show3_matches_baseline(variant):
     image, contour = _viz_images()
     kwargs = dict(contour=contour, image2=image, contour2=contour, image3=image,
                   title="a", title2="b", title3="c", axis=False)
-    assert render(vessel_utils.show3, image, **kwargs) == \
+    assert render(archive.show3, image, **kwargs) == \
            render(original, image, **kwargs), f"show3 [{digest} from {path}]"
 
 
@@ -422,7 +422,7 @@ def test_show_4_matches_baseline(variant):
     digest, original, _source, path = variant
     image, contour = _viz_images()
     for kwargs in [dict(), dict(xlim=(2, 20), ylim=(2, 20))]:
-        assert render(vessel_utils.show_4, image, image, contour, **kwargs) == \
+        assert render(archive.show_4, image, image, contour, **kwargs) == \
                render(original, image, image, contour, **kwargs), \
                f"show_4 [{digest} from {path}] {sorted(kwargs)}"
 
@@ -442,7 +442,7 @@ def test_save_figure_matches_baseline(variant):
             function.body.pop(0)  # drop docstring
         return ast.dump(ast.parse(ast.unparse(function)))
 
-    assert normalise(inspect.getsource(vessel_utils.save_figure)) == normalise(source), \
+    assert normalise(inspect.getsource(archive.save_figure)) == normalise(source), \
         f"save_figure [{digest} from {path}] body differs"
 
 
@@ -452,20 +452,20 @@ def test_save_figure_matches_baseline(variant):
 
 def test_every_baseline_helper_is_accounted_for():
     """No inline helper was silently left behind or silently dropped."""
-    shared = set(vessel_utils.__all__)
+    shared = set(archive.__all__)
     baseline_names = set(baseline.defined_function_names())
     unaccounted = baseline_names - shared - baseline.EXCLUDED
     assert not unaccounted, f"helpers neither shared nor explicitly excluded: {sorted(unaccounted)}"
 
     invented = shared - baseline_names
-    assert not invented, f"vessel_utils exports names no notebook ever defined: {sorted(invented)}"
+    assert not invented, f"velazquez_rivera_2025 exports names no notebook ever defined: {sorted(invented)}"
 
 
 def test_dropped_helpers_are_really_gone():
-    assert not hasattr(vessel_utils, "preprocess_image")
-    assert "preprocess_image" not in vessel_utils.__all__
+    assert not hasattr(archive, "preprocess_image")
+    assert "preprocess_image" not in archive.__all__
 
 
 def test_every_exported_name_resolves():
-    for name in vessel_utils.__all__:
-        assert callable(getattr(vessel_utils, name)), name
+    for name in archive.__all__:
+        assert callable(getattr(archive, name)), name

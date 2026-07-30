@@ -1,43 +1,58 @@
-"""Shared helpers for the blood vessel processing notebooks.
+"""Active vessel segmentation and channel-comparison code.
 
-Modules follow the pipeline stages:
+The published pipeline lives in `velazquez_rivera_2025` and is frozen. This
+package is where new work goes, and it is free to differ — the point is to do
+better, not to reproduce.
 
-    io        reading TIFF slices and unpacking channels
-    enhance   contrast, gamma, histogram equalisation, N4 bias correction
-    vessels   Hessian vesselness detection, mask post-processing, brain masking
-    metrics   agreement metrics between two binary masks
-    viz       inline previews and figure export
+    vesselness   Jerman vesselness: physical scales, 2D/3D, bounded response
+    threshold    hysteresis thresholding and mask clean-up
+    metrics      Dice, Jaccard, precision, recall, clDice, area fractions
+    sweep        threshold sensitivity analysis
 
-Names are re-exported here for convenience, but resolved lazily so that
-importing one module does not pull in another's heavy dependency — reaching for
-`metrics` should not require `itk` to be installed.
+Typical use for comparing two channels::
+
+    from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue
+    from vessel_utils.sweep import threshold_sweep, stability
+
+    spacing = (3.0, 0.75, 0.75)          # z, y, x in um
+    sigmas = [1.5, 3.0, 6.0, 12.0]       # bracket the vessel radii, in um
+
+    # Pin the tau reference once so a threshold means the same thing everywhere.
+    reference = max_eigenvalue(calibration_volume, sigmas, spacing)
+
+    va = jerman_vesselness(channel_a, sigmas, spacing, reference_lambda=reference)
+    vb = jerman_vesselness(channel_b, sigmas, spacing, reference_lambda=reference)
+
+    rows = threshold_sweep(va, vb, np.linspace(0.05, 0.6, 12), roi=brain_mask)
+    print(stability(rows, "dice"))
+
+Names are re-exported lazily, so importing `metrics` does not pull in anything
+`vesselness` needs.
 """
 
 import importlib
 
 __all__ = [
-    # io
-    "read_tif", "load_channel", "load_channels", "load_3_channels",
-    # enhance
-    "auto_contrast", "gamma_correction", "histogram_equalization",
-    "compute_average_image", "n4_bias_correction",
-    # vessels
-    "detect_vessels", "process_vessels", "get_brain_mask",
+    # vesselness
+    "hessian_eigenvalues", "jerman_vesselness", "max_eigenvalue",
+    # threshold
+    "hysteresis_threshold", "otsu_threshold", "clean_mask", "segment",
     # metrics
-    "dice_coefficient", "iou", "precision", "recall", "rand_index",
-    # viz
-    "show", "show3", "show_4", "save_figure",
+    "dice", "jaccard", "precision", "recall", "cl_dice", "area_fraction",
+    "agreement", "agreement_by_calibre",
+    # sweep
+    "threshold_sweep", "stability", "write_csv",
 ]
 
 _ORIGIN = {
-    "read_tif": "io", "load_channel": "io", "load_channels": "io", "load_3_channels": "io",
-    "auto_contrast": "enhance", "gamma_correction": "enhance",
-    "histogram_equalization": "enhance", "compute_average_image": "enhance",
-    "n4_bias_correction": "enhance",
-    "detect_vessels": "vessels", "process_vessels": "vessels", "get_brain_mask": "vessels",
-    "dice_coefficient": "metrics", "iou": "metrics", "precision": "metrics",
-    "recall": "metrics", "rand_index": "metrics",
-    "show": "viz", "show3": "viz", "show_4": "viz", "save_figure": "viz",
+    "hessian_eigenvalues": "vesselness", "jerman_vesselness": "vesselness",
+    "max_eigenvalue": "vesselness",
+    "hysteresis_threshold": "threshold", "otsu_threshold": "threshold",
+    "clean_mask": "threshold", "segment": "threshold",
+    "dice": "metrics", "jaccard": "metrics", "precision": "metrics",
+    "recall": "metrics", "cl_dice": "metrics", "area_fraction": "metrics",
+    "agreement": "metrics", "agreement_by_calibre": "metrics",
+    "threshold_sweep": "sweep", "stability": "sweep", "write_csv": "sweep",
 }
 
 

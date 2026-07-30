@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-import vessel_utils
+import velazquez_rivera_2025 as archive
 from tests import baseline
 
 REPO = Path(__file__).resolve().parent.parent
 NOTEBOOKS = sorted(REPO.glob("process_*/**/*.ipynb"))
-SHARED = set(vessel_utils.__all__)
+SHARED = set(archive.__all__)
 
 
 def pytest_generate_tests(metafunc):
@@ -83,7 +83,7 @@ def test_every_shared_helper_used_is_imported(notebook):
 
     for tree in trees(notebook):
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("vessel_utils"):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("velazquez_rivera_2025"):
                 imported |= {alias.asname or alias.name for alias in node.names}
             elif isinstance(node, ast.FunctionDef):
                 defined.add(node.name)
@@ -105,7 +105,7 @@ def test_no_unused_shared_imports(notebook):
     used = set()
     for tree in trees(notebook):
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("vessel_utils"):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("velazquez_rivera_2025"):
                 imported |= {alias.asname or alias.name for alias in node.names}
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in SHARED:
                 used.add(node.id)
@@ -115,9 +115,9 @@ def test_no_unused_shared_imports(notebook):
 
 def test_bootstrap_present_when_imports_are(notebook):
     text = notebook.read_text(encoding="utf-8")
-    if "from vessel_utils" in text:
-        assert "vessel_utils" in text and "sys.path.insert" in text, \
-            f"{relative(notebook)} imports vessel_utils without the path bootstrap"
+    if "from velazquez_rivera_2025" in text:
+        assert "velazquez_rivera_2025" in text and "sys.path.insert" in text, \
+            f"{relative(notebook)} imports velazquez_rivera_2025 without the path bootstrap"
 
 
 # --------------------------------------------------------------------------

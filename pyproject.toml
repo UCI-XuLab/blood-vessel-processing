@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vessel-utils"
 version = "1.0.0"
-description = "Shared helpers for the blood vessel processing notebooks"
+description = "Blood vessel segmentation for mouse brain microscopy: the published pipeline, frozen, plus active development"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -23,7 +23,7 @@ dependencies = [
 dev = ["pytest"]
 
 [tool.setuptools]
-packages = ["vessel_utils"]
+packages = ["velazquez_rivera_2025", "vessel_utils"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
