@@ -8,7 +8,9 @@ For the paper: Specific targeting of brain endothelial cells using enhancer AAV 
 
 ## Layout
 
-The image processing routines live in `vessel_utils/`, split by pipeline stage:
+### `velazquez_rivera_2025/` — the published implementation
+
+The routines that produced the figures in the paper, split by pipeline stage:
 
 | module | contents |
 | --- | --- |
@@ -18,7 +20,32 @@ The image processing routines live in `vessel_utils/`, split by pipeline stage:
 | `metrics` | agreement metrics between two binary masks |
 | `viz` | inline previews and figure export |
 
-The analysis itself is stored as Jupyter notebooks, whose contents can be run and modified for any set of images. Each notebook is a workspace for one specimen, holding that specimen's parameters, batch loop, and stored outputs; the shared routines they call are identical, so a change in `vessel_utils` reaches every notebook at once.
+**This package is frozen.** It is the reproducible record of the published analysis, and the test suite fails if any of it changes. Improvements go in `vessel_utils/`.
+
+### `vessel_utils/` — active development
+
+Where follow-up work happens. It is free to differ from the archive:
+
+| module | contents |
+| --- | --- |
+| `vesselness` | Jerman vesselness — physical scales, 2D and 3D, response bounded in [0,1] |
+| `threshold` | hysteresis thresholding and mask clean-up |
+| `metrics` | Dice, Jaccard, precision, recall, clDice, area fractions, agreement by vessel calibre |
+| `sweep` | threshold sensitivity analysis |
+| `storage` | chunked OME-Zarr conversion for volumes larger than memory |
+| `correct` | lightsheet destriping and depth attenuation correction |
+| `chunked` | running filters over large volumes with correctly sized halos |
+| `synth` | synthetic vasculature with a simulated lightsheet acquisition |
+| `ensemble` | combining segmentations and mapping where they disagree |
+| `benchmark` | scoring a segmenter against phantoms with known ground truth |
+| `qc` | first-contact inspection of a new acquisition |
+| `validate` | accuracy on real data without dense annotation |
+
+The main differences: sigmas are in physical units rather than voxels, so anisotropic data is handled correctly; the vesselness response has an absolute scale rather than being rescaled per image, so one threshold means the same thing in both channels and across slices; and the metric set drops four measures that carry little information on binary masks in favour of `clDice`, which compares centrelines and so registers connectivity disagreements that voxel overlap misses.
+
+### Notebooks
+
+The analysis itself is stored as Jupyter notebooks, whose contents can be run and modified for any set of images. Each notebook is a workspace for one specimen, holding that specimen's parameters, batch loop, and stored outputs. They import from `velazquez_rivera_2025` and stay there, so they keep reproducing the published figures.
 
 - `process_brain_slices/` — vessel segmentation per slice, and agreement between the two channels
 - `process_thickness/` — vessel caliber and length via medial-axis skeletonization
@@ -33,6 +60,16 @@ jupyter lab
 
 The install is optional — each notebook locates the repository root and adds it to `sys.path` on its own, so the notebooks also run from a plain checkout.
 
+## Benchmarks
+
+```bash
+python scripts/benchmark_pipeline.py
+```
+
+Reproduces every accuracy figure quoted for the active pipeline, against phantom
+ground truth. Deterministic, so a change in the numbers means a change in the
+pipeline.
+
 ## Tests
 
 ```bash
@@ -40,4 +77,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires the shared versions to produce bit-identical results.
+426 tests. The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires `velazquez_rivera_2025` to produce bit-identical results; it also hashes that package against a manifest so accidental edits to the published implementation fail loudly. The active package is checked against the properties it claims rather than against history.
