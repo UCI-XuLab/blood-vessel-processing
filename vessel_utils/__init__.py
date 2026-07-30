@@ -11,6 +11,9 @@ better, not to reproduce.
     threshold    hysteresis thresholding and mask clean-up
     metrics      Dice, Jaccard, precision, recall, clDice, area fractions
     sweep        threshold sensitivity analysis
+    synth        synthetic vasculature with a simulated lightsheet acquisition
+    ensemble     combining several segmentations and mapping their disagreement
+    benchmark    scoring a segmenter against phantoms with known ground truth
 
 Typical use for comparing two channels::
 
@@ -53,6 +56,13 @@ __all__ = [
     "agreement", "agreement_by_calibre",
     # sweep
     "threshold_sweep", "stability", "write_csv",
+    # synth
+    "Segment", "vascular_tree", "render_tree", "simulate_acquisition", "phantom",
+    # ensemble
+    "vote_fraction", "consensus", "disagreement_map", "pairwise_agreement",
+    "redundancy",
+    # benchmark
+    "score_segmentation", "run_benchmark", "sweep_condition", "summarise",
 ]
 
 _ORIGIN = {
@@ -71,10 +81,26 @@ _ORIGIN = {
     "recall": "metrics", "cl_dice": "metrics", "area_fraction": "metrics",
     "agreement": "metrics", "agreement_by_calibre": "metrics",
     "threshold_sweep": "sweep", "stability": "sweep", "write_csv": "sweep",
+    "Segment": "synth", "vascular_tree": "synth", "render_tree": "synth",
+    "simulate_acquisition": "synth", "phantom": "synth",
+    "vote_fraction": "ensemble", "consensus": "ensemble",
+    "disagreement_map": "ensemble", "pairwise_agreement": "ensemble",
+    "redundancy": "ensemble",
+    "score_segmentation": "benchmark", "run_benchmark": "benchmark",
+    "sweep_condition": "benchmark", "summarise": "benchmark",
 }
 
 
+_SUBMODULES = {"storage", "correct", "chunked", "vesselness", "threshold",
+               "metrics", "sweep", "synth", "ensemble", "benchmark"}
+
+
 def __getattr__(name):
+    # A submodule always wins over a re-exported function of the same name.
+    if name in _SUBMODULES:
+        module = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
     if name in _ORIGIN:
         module = importlib.import_module(f"{__name__}.{_ORIGIN[name]}")
         value = getattr(module, name)
