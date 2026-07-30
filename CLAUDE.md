@@ -41,6 +41,9 @@ Both packages are split by pipeline stage, so an import block reads as a descrip
 
 | module | contents |
 | --- | --- |
+| [storage.py](vessel_utils/storage.py) | `plane_series_to_zarr`, `open_volume`, `write_volume`, `read_spacing` |
+| [correct.py](vessel_utils/correct.py) | `destripe`, `tissue_mask`, `depth_profile`, `correct_depth_attenuation` |
+| [chunked.py](vessel_utils/chunked.py) | `overlap_depth`, `map_blocks_with_halo`, `apply_vesselness` |
 | [vesselness.py](vessel_utils/vesselness.py) | `jerman_vesselness`, `hessian_eigenvalues`, `max_eigenvalue` |
 | [threshold.py](vessel_utils/threshold.py) | `hysteresis_threshold`, `otsu_threshold`, `clean_mask`, `segment` |
 | [metrics.py](vessel_utils/metrics.py) | `dice`, `jaccard`, `precision`, `recall`, `cl_dice`, `area_fraction`, `agreement`, `agreement_by_calibre` |
@@ -55,6 +58,21 @@ Three deliberate departures, each addressing a consistency problem in the archiv
 - **A trimmed metric set.** Of the archive's eight metrics, `mean_squared_error` and `hamming` are provably the same number on binary masks, `rand_index` is pixel accuracy (two *unrelated* masks still score ~0.91), and `ssim` scores ~0.60 for unrelated masks. The active package keeps Dice, Jaccard, precision and recall, and adds `cl_dice`, which compares skeletons and so notices connectivity disagreements that voxel overlap misses.
 
 `vessel_utils.metrics.jaccard` is named differently from the archive's `iou` on purpose — it binarises first, so it agrees with the archive on boolean input and is simply correct on numeric input.
+
+### Working at whole-brain scale
+
+A raw acquisition is ~2600 planes of ~10k x 10k, about 500 GB per channel. Three consequences shape the active package:
+
+- **Convert to Zarr once, before anything else.** A directory of one TIFF per plane is the worst layout for 3D work: a 64-voxel-deep column means opening 64 files and decoding 64 full planes. `plane_series_to_zarr` writes chunked blocks plus a pyramid; coarse levels exist so tissue masks and depth profiles, which need no capillary detail, are cheap.
+- **Halos must match the filter's actual reach.** `overlap_depth` sizes them from the largest sigma *in physical units*, so anisotropic spacing gives different halos per axis. `GAUSSIAN_TRUNCATE` is **4.0** because that is what `scipy.ndimage.gaussian_filter` actually uses — the conventional 3σ figure undersizes the halo and leaves a real seam at every chunk boundary, which on a vessel mask severs vessels and changes topology.
+- **`apply_vesselness` refuses to run without `reference_lambda`.** Per-block regularisation would make the response mean something different in every chunk, turning seams into genuine discontinuities.
+
+### Lightsheet corrections
+
+Both artefacts corrected in [correct.py](vessel_utils/correct.py) are *channel-asymmetric*, which is why they corrupt a comparison rather than merely degrading it:
+
+- **Stripes** are linear structures, exactly what a Hessian filter is built to fire on — so they are false vessels, not background noise. `destripe` cannot separate a stripe from a vessel running the full width parallel to the illumination axis; that limitation is documented and pinned by a test.
+- **Depth attenuation** differs by wavelength (488/561/640), so uncorrected it puts a channel-dependent gradient straight into the agreement metric. **Correct each channel with its own profile** — sharing one reintroduces the asymmetry. `depth_profile` uses the median rather than the mean because vessels are a bright minority and a mean tracks vessel density as much as illumination.
 
 Each notebook opens with a bootstrap cell that walks up from the working directory to find the repo root (by looking for `pyproject.toml`) and adds it to `sys.path`. That is why `pip install -e .` is optional — do not remove the bootstrap, the lab runs these notebooks directly and must not acquire a setup step it can silently skip.
 

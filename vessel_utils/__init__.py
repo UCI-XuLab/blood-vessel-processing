@@ -4,6 +4,9 @@ The published pipeline lives in `velazquez_rivera_2025` and is frozen. This
 package is where new work goes, and it is free to differ — the point is to do
 better, not to reproduce.
 
+    storage      chunked OME-Zarr conversion and access for volumes > memory
+    correct      lightsheet destriping and depth attenuation correction
+    chunked      running filters over large volumes with correctly sized halos
     vesselness   Jerman vesselness: physical scales, 2D/3D, bounded response
     threshold    hysteresis thresholding and mask clean-up
     metrics      Dice, Jaccard, precision, recall, clDice, area fractions
@@ -33,6 +36,14 @@ Names are re-exported lazily, so importing `metrics` does not pull in anything
 import importlib
 
 __all__ = [
+    # storage
+    "plane_series_to_zarr", "open_volume", "write_volume", "pyramid_levels",
+    "read_spacing",
+    # correct
+    "destripe", "tissue_mask", "depth_profile", "correct_depth_attenuation",
+    "smooth_profile",
+    # chunked
+    "gaussian_reach", "overlap_depth", "map_blocks_with_halo", "apply_vesselness",
     # vesselness
     "hessian_eigenvalues", "jerman_vesselness", "max_eigenvalue",
     # threshold
@@ -45,6 +56,13 @@ __all__ = [
 ]
 
 _ORIGIN = {
+    "plane_series_to_zarr": "storage", "open_volume": "storage",
+    "write_volume": "storage", "pyramid_levels": "storage",
+    "read_spacing": "storage",
+    "destripe": "correct", "tissue_mask": "correct", "depth_profile": "correct",
+    "correct_depth_attenuation": "correct", "smooth_profile": "correct",
+    "gaussian_reach": "chunked", "overlap_depth": "chunked",
+    "map_blocks_with_halo": "chunked", "apply_vesselness": "chunked",
     "hessian_eigenvalues": "vesselness", "jerman_vesselness": "vesselness",
     "max_eigenvalue": "vesselness",
     "hysteresis_threshold": "threshold", "otsu_threshold": "threshold",

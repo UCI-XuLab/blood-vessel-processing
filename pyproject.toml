@@ -16,6 +16,10 @@ dependencies = [
     "scikit-image",
     "scipy",
     "SimpleITK",
+    "zarr",
+    "dask",
+    "tifffile",
+    "PyWavelets",
     "tqdm",
 ]
 
