@@ -14,6 +14,8 @@ better, not to reproduce.
     synth        synthetic vasculature with a simulated lightsheet acquisition
     ensemble     combining several segmentations and mapping their disagreement
     benchmark    scoring a segmenter against phantoms with known ground truth
+    qc           first-contact inspection of a new acquisition
+    validate     accuracy on real data without dense annotation
 
 Typical use for comparing two channels::
 
@@ -63,6 +65,12 @@ __all__ = [
     "redundancy",
     # benchmark
     "score_segmentation", "run_benchmark", "sweep_condition", "summarise",
+    # qc
+    "inspect_volume", "estimate_attenuation", "stripe_severity", "resolvability",
+    "compare_channels", "suggest_sigmas", "intake_report", "format_report",
+    # validate
+    "stratified_sample", "extract_crops", "estimate_accuracy",
+    "agreement_by_depth", "depth_invariance",
 ]
 
 _ORIGIN = {
@@ -88,11 +96,18 @@ _ORIGIN = {
     "redundancy": "ensemble",
     "score_segmentation": "benchmark", "run_benchmark": "benchmark",
     "sweep_condition": "benchmark", "summarise": "benchmark",
+    "inspect_volume": "qc", "estimate_attenuation": "qc", "stripe_severity": "qc",
+    "resolvability": "qc", "compare_channels": "qc", "suggest_sigmas": "qc",
+    "intake_report": "qc", "format_report": "qc",
+    "stratified_sample": "validate", "extract_crops": "validate",
+    "estimate_accuracy": "validate", "agreement_by_depth": "validate",
+    "depth_invariance": "validate",
 }
 
 
 _SUBMODULES = {"storage", "correct", "chunked", "vesselness", "threshold",
-               "metrics", "sweep", "synth", "ensemble", "benchmark"}
+               "metrics", "sweep", "synth", "ensemble", "benchmark", "qc",
+               "validate"}
 
 
 def __getattr__(name):
