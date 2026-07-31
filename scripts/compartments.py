@@ -33,6 +33,11 @@ Three causes, each fixed here:
 
 A method that can fail quietly is worse than none, so `compartment_masks`
 returns a confidence report and raises when the split is not supported.
+
+Work in progress: on the pilot sections these masks locate the horns but do not
+trace the butterfly cleanly, and the grey fraction comes out anatomically
+inverted. Not used for any reported result. Requires scikit-learn (not a package
+dependency; install it separately to run this script).
 """
 
 import numpy as np
@@ -122,9 +127,11 @@ def compartment_masks(cd31_normalised, tissue, um_per_px, reference_lambda=2.5,
     partition is the failure mode this exists to prevent.
     """
     tissue = np.asarray(tissue, dtype=bool)
-    rim = int(round(RIM_UM / um_per_px))
-    core = ndi.binary_erosion(tissue, ndi.generate_binary_structure(2, 1),
-                              iterations=rim)
+    # Euclidean rim, matching analyse_spinal_cord.tissue_mask. Iterating a
+    # 4-connected structure is an L1 erosion, so a diagonal edge would only be
+    # cleared to RIM_UM / sqrt(2) ~ 64 um instead of 90 — under-delivering the
+    # rim exactly where pial staining runs along oblique borders.
+    core = tissue & (ndi.distance_transform_edt(tissue) > RIM_UM / um_per_px)
     if not core.any():
         raise ValueError("section is smaller than the rim exclusion")
 

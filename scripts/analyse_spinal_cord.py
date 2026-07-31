@@ -62,10 +62,13 @@ DATA = Path(r"Z:\Lab\Eric V\BEC Spinal Cords\composites_EV")
 UM_PER_PX = 0.650193          # from the calibrated files; identical in all 34 of them
 SIGMAS = [1.5, 3.0, 6.0, 12.0]   # um, capillary through venule radius
 # Hysteresis with a WIDE gap. The seed (high) sits on confident vessel; the grow
-# (low) sits just above the noise floor. A narrow gap (the old low = high*0.5)
-# recovered only 45% of dim vessels; seeding high and growing far lower recovers
-# 91%, because it follows dim vessel segments connected to bright ones. The two
-# thresholds do different jobs and are set independently, not as a ratio.
+# (low) sits just above the noise floor. Measured across six SYFP2 sections by
+# scripts/dim_recall_check.py: the old narrow gap (low = high*0.5) recovered a
+# mean 0.19 of dim vessels, the wide gap 0.74 — because the wide gap follows dim
+# vessel segments connected to bright ones. (Recall here is against a
+# local-threshold visible-vessel proxy, not manual ground truth; read it as the
+# difference between the two settings, not absolute accuracy.) The two thresholds
+# do different jobs and are set independently, not as a ratio.
 VESSEL_HIGH = 0.15            # seed: confident vessel in the Jerman response
 VESSEL_LOW = 0.02            # grow: ~2x the response noise floor
 RIM_UM = 90.0                # eroded off the tissue edge; 40 um left pial

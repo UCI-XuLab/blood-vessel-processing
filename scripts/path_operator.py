@@ -34,18 +34,31 @@ __all__ = ["line_footprint", "path_opening_response", "path_operator_vesselness"
 
 
 def line_footprint(length, angle_deg):
-    """A 1-pixel-wide line structuring element of the given length and angle."""
+    """A 1-pixel-wide line structuring element of exactly `length` pixels.
+
+    Rasterising by stepping `r` along (cos, sin) and rounding collapses distinct
+    steps to the same pixel near the diagonals, so a nominally length-21 line at
+    45 degrees came out ~15 pixels — meaning diagonal structures needed a third
+    less length to survive the opening than axis-aligned ones. Driving the
+    rasterisation from the longer axis, so the span on that axis is length-1,
+    gives exactly `length` pixels at every angle (a Bresenham line has
+    max(|dr|, |dc|) + 1 pixels).
+    """
+    from skimage.draw import line
+
     angle = np.deg2rad(angle_deg)
     dx, dy = np.cos(angle), np.sin(angle)
-    coords = [(int(round(r * dy)), int(round(r * dx)))
-              for r in np.arange(-(length // 2), length // 2 + 1)]
-    coords = sorted(set(coords))
-    rows = [c[0] for c in coords]
-    cols = [c[1] for c in coords]
-    r0, c0 = min(rows), min(cols)
-    fp = np.zeros((max(rows) - r0 + 1, max(cols) - c0 + 1), dtype=bool)
-    for r, c in coords:
-        fp[r - r0, c - c0] = True
+    span = length - 1
+    if abs(dx) >= abs(dy):
+        dc = span
+        dr = int(round(span * (dy / dx))) if dx != 0 else 0
+    else:
+        dr = span
+        dc = int(round(span * (dx / dy))) if dy != 0 else 0
+    rr, cc = line(0, 0, dr, dc)
+    rr, cc = rr - rr.min(), cc - cc.min()
+    fp = np.zeros((rr.max() + 1, cc.max() + 1), dtype=bool)
+    fp[rr, cc] = True
     return fp
 
 
@@ -87,5 +100,11 @@ def path_operator_vesselness(image, lengths, n_orientations=8, gap=1):
         isotropic = np.median(responses, axis=0)  # a blob survives in all
         # Elongation: bright where the aligned response exceeds the isotropic one.
         best = np.maximum(best, aligned - isotropic)
+    # WARNING: this divides by the image's own maximum, so the [0, 1] scale means
+    # something different in every section — the very per-image dependence that
+    # vessel_utils removed with reference_lambda. It is here only so the response
+    # is thresholdable in isolation. For a fair comparison against Jerman under a
+    # fixed dataset-wide threshold, replace this with a dataset-wide reference,
+    # exactly as jerman_vesselness does; see build_rorpo.md.
     peak = float(best.max())
     return best / peak if peak > 0 else best
