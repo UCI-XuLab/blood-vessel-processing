@@ -34,7 +34,7 @@ The virus threshold is set per image from the non-vessel tissue itself
 fixed absolute cut would confound acquisition settings with biology.
 
 Artefact handling, all from the dataset README:
-  - a 40 um rim is eroded off the tissue mask, dropping the edge staining artefacts
+  - a 90 um rim is removed from the tissue mask, dropping the edge staining artefacts
   - the tissue mask excludes the black background and the rotated-composite corners
   - grey-matter background is *not* removed: it is the leak being measured, and
     it is why off_target is reported separately rather than folded into a score
@@ -61,9 +61,15 @@ from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue  # noqa: E
 DATA = Path(r"Z:\Lab\Eric V\BEC Spinal Cords\composites_EV")
 UM_PER_PX = 0.650193          # from the calibrated files; identical in all 34 of them
 SIGMAS = [1.5, 3.0, 6.0, 12.0]   # um, capillary through venule radius
-VESSEL_HIGH = 0.25            # Jerman seeding threshold on CD31
-VESSEL_RATIO = 0.5            # hysteresis growing threshold, as a fraction
-RIM_UM = 40.0                 # eroded off the tissue edge
+# Hysteresis with a WIDE gap. The seed (high) sits on confident vessel; the grow
+# (low) sits just above the noise floor. A narrow gap (the old low = high*0.5)
+# recovered only 45% of dim vessels; seeding high and growing far lower recovers
+# 91%, because it follows dim vessel segments connected to bright ones. The two
+# thresholds do different jobs and are set independently, not as a ratio.
+VESSEL_HIGH = 0.15            # seed: confident vessel in the Jerman response
+VESSEL_LOW = 0.02            # grow: ~2x the response noise floor
+RIM_UM = 90.0                # eroded off the tissue edge; 40 um left pial
+                             # staining in, which dominated the density map
 MIN_VESSEL_UM2 = 6.0
 VIRUS_K = 3.0                 # virus-positive = background median + k * MAD
 
@@ -84,7 +90,12 @@ def tissue_mask(green, cd31):
     labels, count = ndi.label(mask)
     if count:
         mask = labels == (np.bincount(labels.ravel())[1:].argmax() + 1)
-    return binary_erosion(mask, disk(int(round(RIM_UM / UM_PER_PX))))
+    # Remove a rim of RIM_UM via the distance transform, not a disk erosion: a
+    # 90 um rim is a disk of radius ~138 px, and eroding a 2000x3000 image with a
+    # 277x277 structuring element exhausts memory. The distance transform gives
+    # the exact same result — every pixel within RIM_UM of the edge — in O(n).
+    distance = ndi.distance_transform_edt(mask)
+    return mask & (distance > RIM_UM / UM_PER_PX)
 
 
 def calibrate_reference(paths, n_sections=6):
@@ -149,7 +160,7 @@ def vessel_mask(cd31, tissue, reference):
     response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
                                  SIGMAS, (UM_PER_PX, UM_PER_PX),
                                  reference_lambda=reference)
-    return segment(response, low=VESSEL_HIGH * VESSEL_RATIO, high=VESSEL_HIGH,
+    return segment(response, low=VESSEL_LOW, high=VESSEL_HIGH,
                    roi=tissue, min_size=int(round(MIN_VESSEL_UM2 / UM_PER_PX ** 2)),
                    area_threshold=0, closing_radius=1)
 
@@ -250,10 +261,11 @@ def curated_paths(pilot_mice=None, slices_per_region=None):
 
 def main():
     pilot = "--full" not in sys.argv
+    slices = 3 if "--slices3" in sys.argv else 1
     if pilot:
-        paths = curated_paths(pilot_mice=2, slices_per_region=1)
-        print(f"PILOT: {len(paths)} images (2 mice per reporter, 1 slice per region). "
-              f"Pass --full for everything.\n")
+        paths = curated_paths(pilot_mice=2, slices_per_region=slices)
+        print(f"PILOT: {len(paths)} images (2 mice per reporter, {slices} slice(s) "
+              f"per region). --slices3 for three, --full for everything.\n")
     else:
         paths = curated_paths()
         print(f"{len(paths)} curated two-channel images (Fig 1 and Fig 2)\n")
@@ -279,7 +291,7 @@ def main():
 
     out = Path(__file__).resolve().parent.parent / "results"
     out.mkdir(exist_ok=True)
-    csv_path = out / ("spinal_cord_specificity_pilot.csv" if pilot
+    csv_path = out / (f"spinal_cord_specificity_pilot{slices}.csv" if pilot
                       else "spinal_cord_specificity.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
