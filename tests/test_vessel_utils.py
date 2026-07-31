@@ -428,3 +428,88 @@ def test_metrics_do_not_require_the_vesselness_dependencies():
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=str(
         __import__("pathlib").Path(__file__).resolve().parent.parent))
+
+
+def test_max_eigenvalue_percentile_is_more_stable_than_the_max():
+    """The max is set by one bright structure; a high quantile is not.
+
+    This is why calibration across a dataset should not use the default: a
+    single unusually bright object moves the reference, and the reference sets
+    the vessel criterion for every image calibrated against it.
+    """
+    # The image must be large enough that a small speck sits outside the 99.9th
+    # percentile: at 96x96 a 3x3 speck is 9 of 9216 pixels and lands exactly in
+    # that tail, so the quantile would move too and the test would prove nothing.
+    base = tube_2d(shape=(320, 320), radius=4.0, amplitude=1.0)
+    with_outlier = base.copy()
+    with_outlier[:3, :3] = 60.0                    # 9 of 102400 pixels
+
+    sigmas = [2.0, 4.0]
+    max_clean = vesselness.max_eigenvalue(base, sigmas)
+    max_spiked = vesselness.max_eigenvalue(with_outlier, sigmas)
+    pct_clean = vesselness.max_eigenvalue(base, sigmas, percentile=99.9)
+    pct_spiked = vesselness.max_eigenvalue(with_outlier, sigmas, percentile=99.9)
+
+    assert max_spiked > max_clean * 2, "the max should be dragged by the speck"
+    assert pct_spiked == pytest.approx(pct_clean, rel=0.25), \
+        "a high quantile should barely move"
+
+
+def test_max_eigenvalue_respects_a_mask_and_validates_percentile():
+    image = tube_2d(radius=4.0)
+    roi = np.zeros(image.shape, bool)
+    roi[image.shape[0] // 2 - 10: image.shape[0] // 2 + 10] = True
+    masked = vesselness.max_eigenvalue(image, [2.0], percentile=99.0, mask=roi)
+    assert masked > 0
+    with pytest.raises(ValueError, match="percentile"):
+        vesselness.max_eigenvalue(image, [2.0], percentile=0.0)
+
+
+def structured_2d(shape=(256, 256), seed=0):
+    rng = np.random.default_rng(seed)
+    image = rng.random(shape).astype(np.float32) * 50 + 100
+    for offset in range(20, shape[0] - 10, 40):
+        image[offset:offset + 5, :] += 600
+    return image
+
+
+def test_2d_response_is_near_binary():
+    """Jerman in 2D sets lambda_3 := lambda_2, so saturation is unconditional.
+
+    Documented because it changes how the module must be used: in 2D the
+    operating point is reference_lambda, not the threshold.
+    """
+    response = vesselness.jerman_vesselness(structured_2d(), [2.0, 4.0],
+                                            reference_lambda=2.0)
+    between = np.mean((response > 0.01) & (response < 0.99))
+    assert between < 0.05, f"{between:.3f} of voxels lie strictly between 0 and 1"
+
+
+def test_2d_threshold_barely_moves_the_mask_but_reference_does():
+    image = structured_2d()
+    response = vesselness.jerman_vesselness(image, [2.0, 4.0], reference_lambda=4.0)
+    loose = float(np.mean(response > 0.10))
+    tight = float(np.mean(response > 0.90))
+    assert abs(loose - tight) < 0.10, "the 2D threshold should be nearly inert"
+
+    # The reference, by contrast, is what actually sets the mask. It needs a wide
+    # range to show it: the response only starts responding once tau*ref/2 rises
+    # into the bulk of the lambda_2 distribution, so small references all saturate
+    # alike. That is itself worth knowing when choosing one.
+    small = np.mean(vesselness.jerman_vesselness(image, [2.0, 4.0],
+                                                 reference_lambda=2.0) > 0.5)
+    large = np.mean(vesselness.jerman_vesselness(image, [2.0, 4.0],
+                                                 reference_lambda=40.0) > 0.5)
+    assert small - large > 0.15, "reference_lambda must move the 2D mask"
+
+
+def test_2d_mask_matches_the_cheap_eigenvalue_shortcut():
+    """The shortcut a sweep relies on: mask == max_sigma lambda_2 >= tau*ref/2."""
+    image = structured_2d()
+    sigmas, tau, reference = [2.0, 4.0], 0.75, 4.0
+    lambda_2 = np.max([-vesselness.hessian_eigenvalues(image, s)[..., 1]
+                       for s in sigmas], axis=0)
+    predicted = lambda_2 >= tau * reference / 2
+    actual = vesselness.jerman_vesselness(image, sigmas, tau=tau,
+                                          reference_lambda=reference) >= 0.99
+    assert np.mean(predicted == actual) > 0.97

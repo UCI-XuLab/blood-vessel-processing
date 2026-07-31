@@ -19,6 +19,27 @@ One residual image dependence remains in Jerman: the `tau` regularisation refers
 to the image's own maximum eigenvalue. Pass `reference_lambda` to pin it to a
 value computed once over the dataset and remove that dependence too.
 
+**In 2D, `reference_lambda` is the operating point, not the threshold.** This
+follows from the reference formulation and is easy to be caught by. In 2D there
+is only one cross-sectional eigenvalue, so Jerman sets lambda_3 := lambda_2; the
+saturation condition `lambda_2 >= lambda_rho / 2` then reduces to
+`lambda_2 >= lambda_2 / 2`, which holds for every voxel with positive lambda_2.
+The response is therefore near-binary — measured on real sections, under 2% of
+voxels fall strictly between 0 and 1 — switching at `tau * reference_lambda / 2`.
+
+The consequence in practice: thresholding a 2D response does almost nothing. On
+spinal cord sections, moving the cut from 0.10 to 0.90 changed the segmented area
+fraction from 0.534 to 0.493. If a 2D mask is too fat or too thin, change
+`reference_lambda`; sweeping the threshold will not help. The equivalent mask can
+be obtained directly, and far more cheaply when sweeping, as
+
+    max over sigmas of lambda_2  >=  tau * reference_lambda / 2
+
+which agrees with the full filter to about 98%.
+
+None of this applies in 3D, where lambda_2 and lambda_3 are genuinely different
+and the response varies smoothly — there the threshold does the work.
+
 Reference: T. Jerman, F. Pernus, B. Likar, Z. Spiclin, "Enhancement of Vascular
 Structures in 3D and 2D Angiographic Images", IEEE TMI 35(9):2107-2118, 2016.
 Implemented from the authors' reference code at
@@ -110,23 +131,43 @@ def hessian_eigenvalues(image, sigma, spacing=None, dtype=np.float32):
     return np.take_along_axis(eigenvalues, order, axis=-1)
 
 
-def max_eigenvalue(image, sigmas, spacing=None, bright_objects=True, dtype=np.float32):
-    """Largest regularisation eigenvalue over all scales, for `reference_lambda`.
+def max_eigenvalue(image, sigmas, spacing=None, bright_objects=True, dtype=np.float32,
+                   percentile=100.0, mask=None):
+    """Regularisation eigenvalue over all scales, for `reference_lambda`.
 
     Run this once over a representative subset of the dataset and pass the result
     to every `jerman_vesselness` call. That makes the tau regularisation a fixed
     criterion instead of a per-image one, which is what lets a single threshold
     mean the same thing in both channels and across slices.
+
+    Args:
+        percentile: which upper quantile of the eigenvalue distribution to take.
+            The reference implementation uses the maximum (100). That is an
+            extreme-value statistic set by the single brightest structure in the
+            image, so it is unstable: on real spinal cord sections it varied
+            fourfold between sections of the same cord, which propagates straight
+            into the segmented vessel area. Use 99.9 or so when calibrating
+            across a dataset, where stability matters more than fidelity to the
+            reference.
+        mask: restrict the statistic to a region, e.g. tissue. Background has no
+            structure and only dilutes the quantile.
     """
+    if not 0 < percentile <= 100:
+        raise ValueError(f"percentile must lie in (0, 100], got {percentile}")
+
     best = 0.0
     for sigma in sigmas:
         eigenvalues = hessian_eigenvalues(image, sigma, spacing, dtype)
         largest = eigenvalues[..., -1]
         if bright_objects:
             largest = -largest
+        if mask is not None:
+            largest = largest[np.asarray(mask, dtype=bool)]
         finite = largest[np.isfinite(largest)]
         if finite.size:
-            best = max(best, float(finite.max()))
+            value = (float(finite.max()) if percentile == 100.0
+                     else float(np.percentile(finite, percentile)))
+            best = max(best, value)
     return best
 
 

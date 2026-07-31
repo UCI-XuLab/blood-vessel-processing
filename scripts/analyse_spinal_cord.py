@@ -41,9 +41,9 @@ Artefact handling, all from the dataset README:
 """
 
 import csv
-import os
 import re
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -87,17 +87,74 @@ def tissue_mask(green, cd31):
     return binary_erosion(mask, disk(int(round(RIM_UM / UM_PER_PX))))
 
 
-def vessel_mask(cd31, tissue):
+def calibrate_reference(paths, n_sections=6):
+    """One tau reference for the whole dataset, not one per image.
+
+    This is the point of reference_lambda. Computed per image, the vesselness
+    response would be regularised against that image's own maximum eigenvalue,
+    so a fixed threshold would mean a different thing in every section — and the
+    comparison being made here is precisely across sections, regions and mice.
+    A brighter cervical section would then get a systematically different vessel
+    criterion from a dimmer thoracic one, and the regional difference under test
+    would be partly an artefact of the calibration.
+
+    Sampled across regions so the reference is not set by one anatomy.
+    """
+    chosen = paths[:: max(1, len(paths) // n_sections)][:n_sections]
+    values = []
+    for path in chosen:
+        stack = tifffile.imread(path)
+        green, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
+        # Calibrate on the same normalised input the segmentation will see.
+        normalised = normalise_for_segmentation(cd31, tissue_mask(green, cd31))
+        # A high quantile inside tissue, not the max: the max is set by one
+        # bright structure and varied fourfold between sections of one cord.
+        values.append(max_eigenvalue(normalised, SIGMAS, (UM_PER_PX, UM_PER_PX),
+                                     percentile=99.9,
+                                     mask=tissue_mask(green, cd31)))
+        print(f"   {path.name[:46]:46s} lambda_max {values[-1]:9.1f}")
+    reference = float(np.median(values))
+    print(f"   -> dataset reference_lambda = {reference:.1f} "
+          f"(median of {len(values)}; spread {min(values):.0f}-{max(values):.0f})")
+    return reference
+
+
+def normalise_for_segmentation(channel, tissue):
+    """Put each section's CD31 on a common intensity scale before filtering.
+
+    Necessary, and the pilot showed why. With raw input the vessel area fraction
+    ranged 0.0036 to 0.207 across ten sections — a 57x spread, when CNS vascular
+    density varies by nothing like that. It tracked CD31 staining contrast
+    (p99/p50) almost perfectly: brightly stained sections yielded more "vessels".
+    Normalising each section to its own tissue percentiles collapses that spread
+    to 1.5x.
+
+    Note what is corrected and what is not. Staining and exposure are properties
+    of the acquisition, so equalising them is legitimate. Fixing the *threshold*
+    dataset-wide, which `reference_lambda` does, cannot substitute for this: a
+    common criterion applied to inputs on different scales is still a different
+    criterion. Normalise the input, then fix the threshold.
+
+    Applied to CD31 only. The virus channel is left raw, because `enrichment` is
+    a ratio of virus intensities and subtracting a per-section offset from it
+    would change that ratio — the measurement would then depend on the
+    correction.
+    """
+    low, high = np.percentile(channel[tissue], [50, 99])
+    return np.clip((channel - low) / max(high - low, 1e-6), 0, None).astype(np.float32)
+
+
+def vessel_mask(cd31, tissue, reference):
     """Vessels from CD31 alone — the ground-truth channel."""
-    reference = max_eigenvalue(cd31, SIGMAS, (UM_PER_PX, UM_PER_PX))
-    response = jerman_vesselness(cd31, SIGMAS, (UM_PER_PX, UM_PER_PX),
+    response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
+                                 SIGMAS, (UM_PER_PX, UM_PER_PX),
                                  reference_lambda=reference)
     return segment(response, low=VESSEL_HIGH * VESSEL_RATIO, high=VESSEL_HIGH,
                    roi=tissue, min_size=int(round(MIN_VESSEL_UM2 / UM_PER_PX ** 2)),
-                   area_threshold=0, closing_radius=1), reference
+                   area_threshold=0, closing_radius=1)
 
 
-def analyse(path):
+def analyse(path, reference):
     stack = tifffile.imread(path)
     if stack.ndim != 3 or stack.shape[0] < 2:
         raise ValueError(f"expected a 2-channel composite, got shape {stack.shape}")
@@ -105,7 +162,7 @@ def analyse(path):
     cd31 = stack[1].astype(np.float32)
 
     tissue = tissue_mask(green, cd31)
-    vessels, reference = vessel_mask(cd31, tissue)
+    vessels = vessel_mask(cd31, tissue, reference)
     parenchyma = tissue & ~vessels
 
     if vessels.sum() == 0 or parenchyma.sum() == 0:
@@ -134,25 +191,81 @@ def analyse(path):
         "coverage": coverage,
         "off_target": off_target,
         "dice_virus_vs_cd31": metrics.dice(virus_positive & tissue, vessels),
-        "cl_dice_virus_vs_cd31": metrics.cl_dice(virus_positive & tissue, vessels),
         "virus_area_fraction": float(virus_positive.sum() / tissue.sum()),
         "virus_cut": cut,
         "parenchyma_median": background,
-        "reference_lambda": reference,
     }
 
 
+def channel_count(path):
+    """Channels, read from the header without decoding the image."""
+    with tifffile.TiffFile(path) as handle:
+        series = handle.series[0]
+        return series.shape[0] if series.axes.startswith("C") else 1
+
+
+def curated_paths(pilot_mice=None, slices_per_region=None):
+    """Two-channel Fig 1 / Fig 2 images, optionally cut down to a pilot subset.
+
+    Files with more than two channels are excluded outright rather than having
+    their first two taken: the extra-channel files have not been curated yet, so
+    which two are green and CD31 is not established, and guessing would silently
+    compare the wrong pair.
+    """
+    everything = sorted(p for p in DATA.glob("Fig*.tif")
+                        if NAME.match(p.name)
+                        and NAME.match(p.name).group(1).startswith(("Fig 1", "Fig 2")))
+
+    paths, skipped = [], []
+    for path in everything:
+        count = channel_count(path)
+        (paths if count == 2 else skipped).append((path, count))
+    if skipped:
+        for path, count in skipped:
+            print(f"   excluded (has {count} channels, not 2): {path.name}")
+    paths = [p for p, _ in paths]
+
+    if pilot_mice is None and slices_per_region is None:
+        return paths
+
+    chosen, seen = [], defaultdict(int)
+    mice_by_reporter = defaultdict(list)
+    for path in paths:
+        _, mouse, _, reporter, _ = NAME.match(path.name).groups()
+        if mouse not in mice_by_reporter[reporter]:
+            mice_by_reporter[reporter].append(mouse)
+    keep = {m for reporter in mice_by_reporter
+            for m in mice_by_reporter[reporter][:pilot_mice or len(paths)]}
+
+    for path in paths:
+        _, mouse, region, _, _ = NAME.match(path.name).groups()
+        if mouse not in keep:
+            continue
+        if slices_per_region and seen[(mouse, region)] >= slices_per_region:
+            continue
+        seen[(mouse, region)] += 1
+        chosen.append(path)
+    return chosen
+
+
 def main():
-    paths = sorted(p for p in DATA.glob("Fig*.tif")
-                   if NAME.match(p.name) and NAME.match(p.name).group(1).startswith(
-                       ("Fig 1", "Fig 2")))
-    print(f"{len(paths)} curated images (Fig 1 and Fig 2)\n")
+    pilot = "--full" not in sys.argv
+    if pilot:
+        paths = curated_paths(pilot_mice=2, slices_per_region=1)
+        print(f"PILOT: {len(paths)} images (2 mice per reporter, 1 slice per region). "
+              f"Pass --full for everything.\n")
+    else:
+        paths = curated_paths()
+        print(f"{len(paths)} curated two-channel images (Fig 1 and Fig 2)\n")
+    print("calibrating one dataset-wide reference_lambda:")
+    reference = calibrate_reference(paths, n_sections=min(6, len(paths)))
+    print()
 
     rows = []
     for index, path in enumerate(paths, 1):
         figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
         try:
-            result = analyse(path)
+            result = analyse(path, reference)
         except Exception as error:                       # noqa: BLE001
             print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
             continue
@@ -166,7 +279,8 @@ def main():
 
     out = Path(__file__).resolve().parent.parent / "results"
     out.mkdir(exist_ok=True)
-    csv_path = out / "spinal_cord_specificity.csv"
+    csv_path = out / ("spinal_cord_specificity_pilot.csv" if pilot
+                      else "spinal_cord_specificity.csv")
     with open(csv_path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
