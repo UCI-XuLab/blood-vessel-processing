@@ -5,28 +5,28 @@
 Why this exists rather than another point estimate
 --------------------------------------------------
 Tuning on this data moved the segmented vessel area fraction across 0.004, 0.085
-and 0.35 depending on choices — the normalisation, the reference percentile, the
-seeding threshold — that are individually defensible and jointly
-under-determined. At that point another single number is not evidence, because
-the number can be moved to taste.
+and 0.35 depending on choices — the normalisation, the reference, the threshold —
+that are individually defensible and jointly under-determined. At that point
+another single number is not evidence, because the number can be moved to taste.
 
 So the operating point is swept, and the question is not "what is the enrichment"
 but "does the ordering between regions hold across the whole plausible range". An
 ordering stable across an order of magnitude of vessel area fraction is a
-property of the data. One that appears at one setting is a property of the setting.
+property of the data; one that appears at a single setting is a property of the
+setting.
 
-What is swept, and why it is not the threshold
-----------------------------------------------
-In 2D, Jerman sets lambda_3 := lambda_2, so its saturation condition
-`lambda_2 >= lambda_rho/2` reduces to `lambda_2 >= lambda_2/2` and holds
-everywhere lambda_2 is positive. The response is therefore near-binary and the
-threshold is nearly inert: on these sections moving it from 0.10 to 0.90 changed
-the area fraction from 0.534 to 0.493. The operating point in 2D is
-`reference_lambda`, which sets the switch at `tau * reference / 2`.
+Which knob to sweep, and why it is this one
+-------------------------------------------
+In 2D, Jerman saturates everything above `tau * reference_lambda / 2` to exactly
+1, so the reference and the threshold are coupled and neither can be tuned alone.
+How much authority each has depends on the data. On a bimodal synthetic almost
+everything saturates and the threshold is inert; on these sections the graded
+band held 21-37% of the tissue, so the threshold does most of the work — provided
+the reference is not set so low that the whole section saturates.
 
-That equivalence also makes the sweep cheap. The eigenvalues are computed once
-per section, and each reference is then a comparison against a scalar rather than
-a re-run of the filter — which is what lets this cover a 100x range.
+The reference is therefore fixed at a value where the response is graded rather
+than saturated, and the threshold is swept against it. That also makes the sweep
+cheap: the response is computed once per section and every threshold reuses it.
 """
 
 import sys
@@ -39,39 +39,37 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vessel_utils.threshold import clean_mask                     # noqa: E402
-from vessel_utils.vesselness import hessian_eigenvalues           # noqa: E402
+from vessel_utils.threshold import segment                       # noqa: E402
+from vessel_utils.vesselness import jerman_vesselness            # noqa: E402
 
 from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, curated_paths,  # noqa: E402
                                  normalise_for_segmentation, tissue_mask)
 
 SPACING = (UM_PER_PX, UM_PER_PX)
-REFERENCES = [1.0, 2.5, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0]
-TAU = 0.75
+REFERENCE = 2.5           # graded, not saturated, on these sections
+THRESHOLDS = [0.05, 0.10, 0.20, 0.35, 0.50, 0.70, 0.90]
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 REGIONS = ("C", "T", "L")
 LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar"}
-PLAUSIBLE = (0.01, 0.10)      # CNS vessel area fraction in section
+PLAUSIBLE = (0.01, 0.10)  # CNS vessel area fraction in a section
 
 
 def prepare(path):
-    """Per-section work that does not depend on the operating point."""
+    """Per-section work that does not depend on the threshold."""
     stack = tifffile.imread(path)
     green = stack[0].astype(np.float32)
     cd31 = stack[1].astype(np.float32)
     tissue = tissue_mask(green, cd31)
-    normalised = normalise_for_segmentation(cd31, tissue)
-    # Largest cross-sectional eigenvalue over scales, sign-flipped for bright
-    # vessels. This is the quantity the 2D response thresholds internally.
-    lambda_2 = np.max([-hessian_eigenvalues(normalised, s, SPACING)[..., 1]
-                       for s in SIGMAS], axis=0)
-    return green, tissue, lambda_2
+    response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
+                                 SIGMAS, SPACING, reference_lambda=REFERENCE)
+    return green, tissue, response
 
 
 def main():
     paths = [p for p in curated_paths(pilot_mice=2, slices_per_region=3)
              if NAME.match(p.name).group(4).startswith("SYFP2")]
-    print(f"{len(paths)} SYFP2 sections, 2 mice x 3 regions x 3 slices\n")
+    print(f"{len(paths)} SYFP2 sections, 2 mice x 3 regions x 3 slices")
+    print(f"reference_lambda fixed at {REFERENCE}; sweeping the threshold\n")
 
     prepared = {}
     for index, path in enumerate(paths, 1):
@@ -79,16 +77,21 @@ def main():
         prepared[(mouse, region, slice_id)] = prepare(path)
         print(f"  [{index:2d}/{len(paths)}] {mouse} {region} slice {slice_id}")
 
-    print(f"\n{'reference':>10}{'vessel_af':>11}{'':3}"
-          f"{'cerv':>7}{'thor':>7}{'lumb':>7}   ordering (top region agreement)")
+    graded = np.mean([np.mean((r[2][r[1]] > 0.01) & (r[2][r[1]] < 0.99))
+                      for r in prepared.values()])
+    print(f"\ngraded fraction of the response inside tissue: {graded:.3f} "
+          f"({'threshold has authority' if graded > 0.05 else 'SATURATED - reference too low'})")
+
+    print(f"\n{'thresh':>7}{'vessel_af':>11}{'':3}{'cerv':>7}{'thor':>7}{'lumb':>7}"
+          f"   ordering                 mice agreeing")
     rows = []
-    for reference in REFERENCES:
+    for high in THRESHOLDS:
         per_mouse = defaultdict(lambda: defaultdict(list))
         area_fractions = []
-        for (mouse, region, _), (green, tissue, lambda_2) in prepared.items():
-            mask = clean_mask((lambda_2 >= TAU * reference / 2) & tissue,
-                              min_size=MIN_VESSEL_PX, area_threshold=0,
-                              closing_radius=1)
+        for (mouse, region, _), (green, tissue, response) in prepared.items():
+            mask = segment(response, low=high * 0.5, high=high, roi=tissue,
+                           min_size=MIN_VESSEL_PX, area_threshold=0,
+                           closing_radius=1)
             parenchyma = tissue & ~mask
             if mask.sum() == 0 or parenchyma.sum() == 0:
                 continue
@@ -97,50 +100,46 @@ def main():
                 float(green[mask].mean() / green[parenchyma].mean()))
 
         mice = sorted(per_mouse)
-        if not mice:
-            print(f"{reference:10.1f}   (mask empty at this reference)")
+        if not mice or not all(per_mouse[m][r] for m in mice for r in REGIONS):
+            print(f"{high:7.2f}   (some region empty at this threshold)")
             continue
-        means = {r: float(np.mean([np.mean(per_mouse[m][r]) for m in mice
-                                   if per_mouse[m][r]]))
-                 if any(per_mouse[m][r] for m in mice) else np.nan
+
+        # Mouse means first: three slices are three views of one animal.
+        means = {r: float(np.mean([np.mean(per_mouse[m][r]) for m in mice]))
                  for r in REGIONS}
-        order = sorted((r for r in REGIONS if not np.isnan(means[r])),
-                       key=lambda r: -means[r])
-        top = order[0]
-        agree = sum(1 for m in mice
-                    if per_mouse[m][top] and np.mean(per_mouse[m][top]) ==
-                    max(np.mean(per_mouse[m][r]) for r in REGIONS if per_mouse[m][r]))
+        order = tuple(sorted(REGIONS, key=lambda r: -means[r]))
+        agreeing = sum(1 for m in mice
+                       if tuple(sorted(REGIONS,
+                                       key=lambda r: -np.mean(per_mouse[m][r]))) == order)
         area = float(np.mean(area_fractions))
-        rows.append((reference, area, means, tuple(order), agree, len(mice)))
-        print(f"{reference:10.1f}{area:11.4f}{'':3}"
+        rows.append((high, area, means, order, agreeing, len(mice)))
+        print(f"{high:7.2f}{area:11.4f}{'':3}"
               + "".join(f"{means[r]:7.3f}" for r in REGIONS)
-              + f"   {' > '.join(LONG[r][:4] for r in order)}  ({agree}/{len(mice)})")
+              + f"   {' > '.join(LONG[r][:4] for r in order):22s} {agreeing}/{len(mice)}")
 
     print("\n" + "=" * 78)
     plausible = [r for r in rows if PLAUSIBLE[0] <= r[1] <= PLAUSIBLE[1]]
-    print(f"references giving a plausible vessel area fraction "
+    print(f"thresholds giving a plausible vessel area fraction "
           f"({PLAUSIBLE[0]:.0%}-{PLAUSIBLE[1]:.0%}): "
-          f"{[f'{r[0]:.1f}' for r in plausible] or 'NONE'}")
+          f"{[f'{r[0]:.2f}' for r in plausible] or 'NONE'}")
 
     if plausible:
         orderings = {r[3] for r in plausible}
-        print(f"orderings within that range: {len(orderings)}")
         for ordering in orderings:
-            at = [f"{r[0]:.1f}" for r in plausible if r[3] == ordering]
-            print(f"  {' > '.join(LONG[r][:4] for r in ordering):22s} at reference {', '.join(at)}")
+            at = [f"{r[0]:.2f}" for r in plausible if r[3] == ordering]
+            agree = [f"{r[4]}/{r[5]}" for r in plausible if r[3] == ordering]
+            print(f"  {' > '.join(LONG[r][:4] for r in ordering):22s} "
+                  f"at {', '.join(at)}   mice agreeing: {', '.join(agree)}")
         if len(orderings) == 1:
-            print("\nThe ordering is the same everywhere the segmentation is")
-            print("biologically plausible. That is a property of the data, not the")
-            print("operating point.")
+            print("\nSame ordering everywhere the segmentation is plausible: that is a")
+            print("property of the data, not of the operating point.")
         else:
-            print("\nThe ordering changes within the plausible range, so it cannot be")
+            print("\nThe ordering changes within the plausible range. It cannot be")
             print("claimed without independently justifying one operating point.")
 
-    everywhere = {r[3] for r in rows}
-    print(f"\nacross the full {REFERENCES[0]:.0f}-{REFERENCES[-1]:.0f} reference range: "
-          f"{len(everywhere)} distinct ordering(s)")
-    print("\nNote: this tests robustness to the operating point, not correctness.")
-    print("Every setting here could be consistently wrong. Only ground truth -")
+    print(f"\nacross the full threshold range: {len({r[3] for r in rows})} distinct ordering(s)")
+    print("\nThis tests robustness to the operating point, not correctness. Every")
+    print("setting here could be wrong in the same direction; only ground truth -")
     print("stereological point sampling on a few sections - can settle that.")
 
 

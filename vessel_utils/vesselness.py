@@ -19,26 +19,37 @@ One residual image dependence remains in Jerman: the `tau` regularisation refers
 to the image's own maximum eigenvalue. Pass `reference_lambda` to pin it to a
 value computed once over the dataset and remove that dependence too.
 
-**In 2D, `reference_lambda` is the operating point, not the threshold.** This
-follows from the reference formulation and is easy to be caught by. In 2D there
-is only one cross-sectional eigenvalue, so Jerman sets lambda_3 := lambda_2; the
-saturation condition `lambda_2 >= lambda_rho / 2` then reduces to
-`lambda_2 >= lambda_2 / 2`, which holds for every voxel with positive lambda_2.
-The response is therefore near-binary — measured on real sections, under 2% of
-voxels fall strictly between 0 and 1 — switching at `tau * reference_lambda / 2`.
+**In 2D, `reference_lambda` and the threshold are coupled — set them together.**
+In 2D there is only one cross-sectional eigenvalue, so Jerman sets
+lambda_3 := lambda_2; the saturation condition `lambda_2 >= lambda_rho / 2` then
+reduces to `lambda_2 >= lambda_2 / 2`, which holds wherever lambda_2 is positive.
+So everything at or above `tau * reference_lambda / 2` saturates to exactly 1,
+and only the range below it carries a graded response.
 
-The consequence in practice: thresholding a 2D response does almost nothing. On
-spinal cord sections, moving the cut from 0.10 to 0.90 changed the segmented area
-fraction from 0.534 to 0.493. If a 2D mask is too fat or too thin, change
-`reference_lambda`; sweeping the threshold will not help. The equivalent mask can
-be obtained directly, and far more cheaply when sweeping, as
+How much that matters depends entirely on the data, which is the part that is
+easy to get wrong. If lambda_2 is strongly bimodal — a synthetic image of
+high-contrast tubes on flat noise, say — almost everything saturates, the graded
+band holds about 1% of pixels, and the threshold does nothing. On real tissue,
+with a continuum of vessel calibres and staining intensities, the graded band
+held 21-37% of the section and the threshold did most of the work: at
+`reference_lambda=2.5` the segmented area fraction ran from 0.118 at a cut of
+0.10 to 0.0006 at 0.90.
 
-    max over sigmas of lambda_2  >=  tau * reference_lambda / 2
+So neither knob can be tuned alone, and a sweep of one at a badly chosen value of
+the other reveals nothing. Check the shape of the response on your own data
+before assuming either is doing the work::
 
-which agrees with the full filter to about 98%.
+    response = jerman_vesselness(image, sigmas, spacing, reference_lambda=ref)
+    graded = np.mean((response > 0.01) & (response < 0.99))   # inside the ROI
+
+If `graded` is small the reference is the operating point; if it is large the
+threshold is. In the saturated regime the mask can also be obtained directly, and
+far more cheaply when sweeping, as `max over sigmas of lambda_2 >= tau*ref/2` —
+but that shortcut describes only the saturated core, and will badly understate
+the mask when the graded band is wide.
 
 None of this applies in 3D, where lambda_2 and lambda_3 are genuinely different
-and the response varies smoothly — there the threshold does the work.
+and the response varies smoothly at every setting.
 
 Reference: T. Jerman, F. Pernus, B. Likar, Z. Spiclin, "Enhancement of Vascular
 Structures in 3D and 2D Angiographic Images", IEEE TMI 35(9):2107-2118, 2016.
