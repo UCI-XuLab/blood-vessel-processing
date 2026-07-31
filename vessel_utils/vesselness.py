@@ -19,6 +19,38 @@ One residual image dependence remains in Jerman: the `tau` regularisation refers
 to the image's own maximum eigenvalue. Pass `reference_lambda` to pin it to a
 value computed once over the dataset and remove that dependence too.
 
+**In 2D, `reference_lambda` and the threshold are coupled — set them together.**
+In 2D there is only one cross-sectional eigenvalue, so Jerman sets
+lambda_3 := lambda_2; the saturation condition `lambda_2 >= lambda_rho / 2` then
+reduces to `lambda_2 >= lambda_2 / 2`, which holds wherever lambda_2 is positive.
+So everything at or above `tau * reference_lambda / 2` saturates to exactly 1,
+and only the range below it carries a graded response.
+
+How much that matters depends entirely on the data, which is the part that is
+easy to get wrong. If lambda_2 is strongly bimodal — a synthetic image of
+high-contrast tubes on flat noise, say — almost everything saturates, the graded
+band holds about 1% of pixels, and the threshold does nothing. On real tissue,
+with a continuum of vessel calibres and staining intensities, the graded band
+held 21-37% of the section and the threshold did most of the work: at
+`reference_lambda=2.5` the segmented area fraction ran from 0.118 at a cut of
+0.10 to 0.0006 at 0.90.
+
+So neither knob can be tuned alone, and a sweep of one at a badly chosen value of
+the other reveals nothing. Check the shape of the response on your own data
+before assuming either is doing the work::
+
+    response = jerman_vesselness(image, sigmas, spacing, reference_lambda=ref)
+    graded = np.mean((response > 0.01) & (response < 0.99))   # inside the ROI
+
+If `graded` is small the reference is the operating point; if it is large the
+threshold is. In the saturated regime the mask can also be obtained directly, and
+far more cheaply when sweeping, as `max over sigmas of lambda_2 >= tau*ref/2` —
+but that shortcut describes only the saturated core, and will badly understate
+the mask when the graded band is wide.
+
+None of this applies in 3D, where lambda_2 and lambda_3 are genuinely different
+and the response varies smoothly at every setting.
+
 Reference: T. Jerman, F. Pernus, B. Likar, Z. Spiclin, "Enhancement of Vascular
 Structures in 3D and 2D Angiographic Images", IEEE TMI 35(9):2107-2118, 2016.
 Implemented from the authors' reference code at
@@ -110,23 +142,43 @@ def hessian_eigenvalues(image, sigma, spacing=None, dtype=np.float32):
     return np.take_along_axis(eigenvalues, order, axis=-1)
 
 
-def max_eigenvalue(image, sigmas, spacing=None, bright_objects=True, dtype=np.float32):
-    """Largest regularisation eigenvalue over all scales, for `reference_lambda`.
+def max_eigenvalue(image, sigmas, spacing=None, bright_objects=True, dtype=np.float32,
+                   percentile=100.0, mask=None):
+    """Regularisation eigenvalue over all scales, for `reference_lambda`.
 
     Run this once over a representative subset of the dataset and pass the result
     to every `jerman_vesselness` call. That makes the tau regularisation a fixed
     criterion instead of a per-image one, which is what lets a single threshold
     mean the same thing in both channels and across slices.
+
+    Args:
+        percentile: which upper quantile of the eigenvalue distribution to take.
+            The reference implementation uses the maximum (100). That is an
+            extreme-value statistic set by the single brightest structure in the
+            image, so it is unstable: on real spinal cord sections it varied
+            fourfold between sections of the same cord, which propagates straight
+            into the segmented vessel area. Use 99.9 or so when calibrating
+            across a dataset, where stability matters more than fidelity to the
+            reference.
+        mask: restrict the statistic to a region, e.g. tissue. Background has no
+            structure and only dilutes the quantile.
     """
+    if not 0 < percentile <= 100:
+        raise ValueError(f"percentile must lie in (0, 100], got {percentile}")
+
     best = 0.0
     for sigma in sigmas:
         eigenvalues = hessian_eigenvalues(image, sigma, spacing, dtype)
         largest = eigenvalues[..., -1]
         if bright_objects:
             largest = -largest
+        if mask is not None:
+            largest = largest[np.asarray(mask, dtype=bool)]
         finite = largest[np.isfinite(largest)]
         if finite.size:
-            best = max(best, float(finite.max()))
+            value = (float(finite.max()) if percentile == 100.0
+                     else float(np.percentile(finite, percentile)))
+            best = max(best, value)
     return best
 
 

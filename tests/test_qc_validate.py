@@ -248,3 +248,38 @@ def test_depth_invariance_needs_usable_bins():
 def test_agreement_by_depth_validates_shapes():
     with pytest.raises(ValueError, match="shape mismatch"):
         validate.agreement_by_depth(np.ones((4, 8, 8), bool), np.ones((4, 8, 9), bool))
+
+
+# --------------------------------------------------------------------------
+# 2D sections (spinal cord composites) have no depth axis
+# --------------------------------------------------------------------------
+
+def test_attenuation_refuses_2d_input():
+    """A gradient across a section is staining, not depth attenuation."""
+    with pytest.raises(ValueError, match="depth axis"):
+        qc.estimate_attenuation(np.ones((64, 64)), spacing=(0.65, 0.65))
+
+
+def test_intake_report_handles_2d_sections():
+    rng = np.random.default_rng(0)
+    section = (rng.random((256, 256)) * 400 + 200).astype(np.uint16)
+    section[100:104, 20:230] += 3000                    # a vessel
+    report = qc.intake_report(section, spacing=(0.65, 0.65))
+
+    assert report["volumetric"] is False
+    channel = report["channels"]["ch0"]
+    assert "attenuation" not in channel, "2D input must not report an attenuation"
+    assert channel["noise_sigma"] > 0
+    # At 0.65 um/px a 4 um capillary is comfortably resolved.
+    assert report["resolvability"]["resolved"]
+    assert report["resolvability"]["worst_samples"] == pytest.approx(4.0 / 0.65, rel=1e-3)
+    assert qc.format_report(report)
+
+
+def test_compare_channels_works_without_a_depth_axis():
+    rng = np.random.default_rng(1)
+    a = (rng.random((200, 200)) * 400 + 200).astype(np.uint16)
+    b = (rng.random((200, 200)) * 400 + 200).astype(np.uint16)
+    comparison = qc.compare_channels(a, b, spacing=(0.65, 0.65))
+    assert "warnings" in comparison
+    assert comparison[f"attenuation_a"] is None

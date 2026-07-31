@@ -71,6 +71,12 @@ def inspect_volume(volume, spacing=None, sample=2_000_000, seed=0):
 def estimate_attenuation(volume, spacing=None, mask=None, axis=0):
     """Fit exponential signal decay with depth, per micrometre.
 
+    Only meaningful for a volume with a real depth axis. On a 2D section the
+    first axis is a spatial coordinate within the plane, not depth into tissue,
+    and a fit along it would describe a staining or illumination gradient while
+    calling it attenuation. `intake_report` therefore skips this for 2D input
+    rather than reporting a number that invites the wrong interpretation.
+
     Returned as a decay constant and a half-depth. The half-depth is the number
     to look at: if it is comparable to the brain's thickness, the deep half of
     every measurement is systematically dimmer, and in a two-channel comparison
@@ -79,6 +85,11 @@ def estimate_attenuation(volume, spacing=None, mask=None, axis=0):
     from .correct import depth_profile, smooth_profile
 
     volume = np.asarray(volume)
+    if volume.ndim < 3:
+        raise ValueError(
+            "attenuation needs a depth axis; a 2D section has none. Any gradient "
+            "across a section is staining or illumination, not depth attenuation."
+        )
     profile = smooth_profile(depth_profile(volume, mask=mask, axis=axis), sigma=2.0)
     depth_voxels = np.arange(profile.size)
     step = float(spacing[axis]) if spacing is not None else 1.0
@@ -173,8 +184,9 @@ def compare_channels(channel_a, channel_b, spacing=None, names=("a", "b")):
     """
     info_a = inspect_volume(channel_a, spacing)
     info_b = inspect_volume(channel_b, spacing)
-    attenuation_a = estimate_attenuation(channel_a, spacing)
-    attenuation_b = estimate_attenuation(channel_b, spacing)
+    volumetric = np.asarray(channel_a).ndim >= 3
+    attenuation_a = estimate_attenuation(channel_a, spacing) if volumetric else None
+    attenuation_b = estimate_attenuation(channel_b, spacing) if volumetric else None
 
     warnings = []
     cnr_a, cnr_b = info_a["contrast_to_noise"], info_b["contrast_to_noise"]
@@ -191,12 +203,14 @@ def compare_channels(channel_a, channel_b, spacing=None, names=("a", "b")):
                 f"channel {name} has {info['saturated_fraction']:.2%} saturated voxels; "
                 f"clipped vessel cores flatten the Hessian and suppress vesselness"
             )
-    ratio = (attenuation_a["decay_per_um"] + 1e-12) / (attenuation_b["decay_per_um"] + 1e-12)
-    if ratio > 1.5 or ratio < 1 / 1.5:
-        warnings.append(
-            f"attenuation differs {max(ratio, 1 / ratio):.1f}x between channels; "
-            f"correct each with its own depth profile, never a shared one"
-        )
+    if volumetric:
+        ratio = ((attenuation_a["decay_per_um"] + 1e-12)
+                 / (attenuation_b["decay_per_um"] + 1e-12))
+        if ratio > 1.5 or ratio < 1 / 1.5:
+            warnings.append(
+                f"attenuation differs {max(ratio, 1 / ratio):.1f}x between channels; "
+                f"correct each with its own depth profile, never a shared one"
+            )
 
     return {
         names[0]: info_a, names[1]: info_b,
@@ -224,14 +238,20 @@ def intake_report(channel_a, channel_b=None, spacing=None, names=("ch0", "ch1"),
     """Everything worth knowing about a new acquisition, in one dict."""
     report = {"channels": {}, "warnings": []}
 
-    report["channels"][names[0]] = inspect_volume(channel_a, spacing)
-    report["channels"][names[0]]["attenuation"] = estimate_attenuation(channel_a, spacing)
-    report["channels"][names[0]]["stripes"] = stripe_severity(channel_a)
+    volumetric = np.asarray(channel_a).ndim >= 3
+
+    def describe(channel):
+        info = inspect_volume(channel, spacing)
+        if volumetric:
+            info["attenuation"] = estimate_attenuation(channel, spacing)
+        info["stripes"] = stripe_severity(channel)
+        return info
+
+    report["volumetric"] = volumetric
+    report["channels"][names[0]] = describe(channel_a)
 
     if channel_b is not None:
-        report["channels"][names[1]] = inspect_volume(channel_b, spacing)
-        report["channels"][names[1]]["attenuation"] = estimate_attenuation(channel_b, spacing)
-        report["channels"][names[1]]["stripes"] = stripe_severity(channel_b)
+        report["channels"][names[1]] = describe(channel_b)
         comparison = compare_channels(channel_a, channel_b, spacing, names)
         report["comparable"] = comparison["comparable"]
         report["warnings"].extend(comparison["warnings"])
@@ -262,10 +282,11 @@ def format_report(report):
                      f"noise sigma {info['noise_sigma']:.1f}")
         lines.append(f"  contrast-to-noise {info['contrast_to_noise']:.1f}   "
                      f"saturated {info['saturated_fraction']:.3%}")
-        attenuation = info["attenuation"]
-        lines.append(f"  attenuation half-depth {attenuation['half_depth_um']:.0f} "
-                     f"{'um' if attenuation['units'] == 'physical' else 'planes'}   "
-                     f"signal retained at deepest plane {attenuation['retained_at_end']:.2f}")
+        if "attenuation" in info:
+            attenuation = info["attenuation"]
+            lines.append(f"  attenuation half-depth {attenuation['half_depth_um']:.0f} "
+                         f"{'um' if attenuation['units'] == 'physical' else 'planes'}   "
+                         f"signal retained at deepest plane {attenuation['retained_at_end']:.2f}")
         lines.append(f"  stripe index {info['stripes']['stripe_index']:.3f} "
                      f"(upper bound; aligned vessels inflate it)")
 

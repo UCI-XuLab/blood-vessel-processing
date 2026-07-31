@@ -428,3 +428,120 @@ def test_metrics_do_not_require_the_vesselness_dependencies():
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=str(
         __import__("pathlib").Path(__file__).resolve().parent.parent))
+
+
+def test_max_eigenvalue_percentile_is_more_stable_than_the_max():
+    """The max is set by one bright structure; a high quantile is not.
+
+    This is why calibration across a dataset should not use the default: a
+    single unusually bright object moves the reference, and the reference sets
+    the vessel criterion for every image calibrated against it.
+    """
+    # The image must be large enough that a small speck sits outside the 99.9th
+    # percentile: at 96x96 a 3x3 speck is 9 of 9216 pixels and lands exactly in
+    # that tail, so the quantile would move too and the test would prove nothing.
+    base = tube_2d(shape=(320, 320), radius=4.0, amplitude=1.0)
+    with_outlier = base.copy()
+    with_outlier[:3, :3] = 60.0                    # 9 of 102400 pixels
+
+    sigmas = [2.0, 4.0]
+    max_clean = vesselness.max_eigenvalue(base, sigmas)
+    max_spiked = vesselness.max_eigenvalue(with_outlier, sigmas)
+    pct_clean = vesselness.max_eigenvalue(base, sigmas, percentile=99.9)
+    pct_spiked = vesselness.max_eigenvalue(with_outlier, sigmas, percentile=99.9)
+
+    assert max_spiked > max_clean * 2, "the max should be dragged by the speck"
+    assert pct_spiked == pytest.approx(pct_clean, rel=0.25), \
+        "a high quantile should barely move"
+
+
+def test_max_eigenvalue_respects_a_mask_and_validates_percentile():
+    image = tube_2d(radius=4.0)
+    roi = np.zeros(image.shape, bool)
+    roi[image.shape[0] // 2 - 10: image.shape[0] // 2 + 10] = True
+    masked = vesselness.max_eigenvalue(image, [2.0], percentile=99.0, mask=roi)
+    assert masked > 0
+    with pytest.raises(ValueError, match="percentile"):
+        vesselness.max_eigenvalue(image, [2.0], percentile=0.0)
+
+
+def structured_2d(shape=(256, 256), seed=0):
+    rng = np.random.default_rng(seed)
+    image = rng.random(shape).astype(np.float32) * 50 + 100
+    for offset in range(20, shape[0] - 10, 40):
+        image[offset:offset + 5, :] += 600
+    return image
+
+
+def graded_2d(shape=(256, 256), seed=1):
+    """Tubes across a continuum of widths and brightnesses, as real tissue has.
+
+    The contrast with `structured_2d` is the point of these tests: how much of the
+    2D response is graded rather than saturated depends on the data, so a claim
+    measured on one kind of image does not transfer to the other.
+    """
+    rng = np.random.default_rng(seed)
+    image = rng.random(shape).astype(np.float32) * 40 + 100
+    row = 8
+    for width, amplitude in zip(range(1, 9), np.linspace(40, 700, 8)):
+        if row + width >= shape[0]:
+            break
+        image[row:row + width, :] += amplitude
+        row += width + 12
+    return image
+
+
+def test_2d_saturates_above_tau_reference_over_two():
+    """The structural fact: in 2D everything above tau*ref/2 saturates to 1."""
+    image = structured_2d()
+    sigmas, tau, reference = [2.0, 4.0], 0.75, 4.0
+    lambda_2 = np.max([-vesselness.hessian_eigenvalues(image, s)[..., 1]
+                       for s in sigmas], axis=0)
+    saturated = vesselness.jerman_vesselness(image, sigmas, tau=tau,
+                                             reference_lambda=reference) >= 0.99
+    assert np.mean((lambda_2 >= tau * reference / 2) == saturated) > 0.97
+
+
+def test_how_much_the_2d_threshold_matters_depends_on_the_data():
+    """Bimodal input saturates and the threshold is inert; graded input does not.
+
+    This pins the correction to an earlier, over-general claim. Measured on a
+    bimodal synthetic the graded band was ~1% of pixels and the threshold looked
+    inert; on real tissue it was 21-37% and the threshold did most of the work.
+    Neither knob can be tuned without checking which regime the data is in.
+    """
+    sigmas, reference = [2.0, 4.0], 2.0
+
+    bimodal = vesselness.jerman_vesselness(structured_2d(), sigmas,
+                                           reference_lambda=reference)
+    graded = vesselness.jerman_vesselness(graded_2d(), sigmas,
+                                          reference_lambda=reference)
+
+    bimodal_band = float(np.mean((bimodal > 0.01) & (bimodal < 0.99)))
+    graded_band = float(np.mean((graded > 0.01) & (graded < 0.99)))
+    assert bimodal_band < 0.05, f"bimodal input should saturate, got {bimodal_band:.3f}"
+    # A synthetic of stacked tubes only reaches about 3x the bimodal band. Real
+    # spinal cord sections reached 0.32 against 0.012, roughly 25x, because a
+    # section carries a genuine continuum of calibres that no simple phantom
+    # reproduces. The factor here is what this synthetic actually supports —
+    # raising it would mean tuning the fixture until the assertion passed.
+    assert graded_band > bimodal_band * 2, (
+        f"graded input should carry a wider ramp: {graded_band:.3f} vs {bimodal_band:.3f}")
+
+    # And the threshold's authority follows the band width.
+    def spread(response):
+        return float(np.mean(response > 0.10) - np.mean(response > 0.90))
+
+    assert spread(graded) > spread(bimodal)
+
+
+def test_2d_mask_matches_the_cheap_eigenvalue_shortcut():
+    """The shortcut a sweep relies on: mask == max_sigma lambda_2 >= tau*ref/2."""
+    image = structured_2d()
+    sigmas, tau, reference = [2.0, 4.0], 0.75, 4.0
+    lambda_2 = np.max([-vesselness.hessian_eigenvalues(image, s)[..., 1]
+                       for s in sigmas], axis=0)
+    predicted = lambda_2 >= tau * reference / 2
+    actual = vesselness.jerman_vesselness(image, sigmas, tau=tau,
+                                          reference_lambda=reference) >= 0.99
+    assert np.mean(predicted == actual) > 0.97
