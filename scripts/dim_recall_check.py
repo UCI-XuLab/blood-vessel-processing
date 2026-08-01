@@ -76,7 +76,11 @@ def main():
         _, mouse, region, _, _ = NAME.match(path.name).groups()
         stack = tifffile.imread(path)
         green, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        tissue = tissue_mask(green, cd31)
+        try:
+            tissue = tissue_mask(green, cd31)
+        except ValueError as error:
+            print(f"  SKIP {path.name}: {error}")
+            continue
         normalised = normalise_for_segmentation(cd31, tissue)
         response = jerman_vesselness(normalised, SIGMAS, SPACING, reference_lambda=REFERENCE)
         proxy = visible_vessel_proxy(normalised, tissue)

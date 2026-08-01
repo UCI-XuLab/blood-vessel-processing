@@ -59,7 +59,7 @@ def prepare(path):
     stack = tifffile.imread(path)
     green = stack[0].astype(np.float32)
     cd31 = stack[1].astype(np.float32)
-    tissue = tissue_mask(green, cd31)
+    tissue = tissue_mask(green, cd31)   # raises on an unsegmentable section
     response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
                                  SIGMAS, SPACING, reference_lambda=REFERENCE)
     return green, tissue, response
@@ -74,7 +74,11 @@ def main():
     prepared = {}
     for index, path in enumerate(paths, 1):
         _, mouse, region, _, slice_id = NAME.match(path.name).groups()
-        prepared[(mouse, region, slice_id)] = prepare(path)
+        try:
+            prepared[(mouse, region, slice_id)] = prepare(path)
+        except ValueError as error:
+            print(f"  [{index:2d}/{len(paths)}] SKIP {mouse} {region} slice {slice_id}: {error}")
+            continue
         print(f"  [{index:2d}/{len(paths)}] {mouse} {region} slice {slice_id}")
 
     graded = np.mean([np.mean((r[2][r[1]] > 0.01) & (r[2][r[1]] < 0.99))

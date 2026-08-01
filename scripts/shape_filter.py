@@ -34,7 +34,8 @@ __all__ = ["reject_blobs"]
 
 
 def reject_blobs(mask, um_per_px, max_blob_um=25.0, min_eccentricity=0.9,
-                 min_skeleton_ratio=0.10, return_removed=False):
+                 min_skeleton_ratio=0.10, min_skeleton_area_px=60,
+                 return_removed=False):
     """Drop compact components; keep elongated ones.
 
     Args:
@@ -48,6 +49,9 @@ def reject_blobs(mask, um_per_px, max_blob_um=25.0, min_eccentricity=0.9,
         min_skeleton_ratio: keep a small component if its skeleton length over
             area (per pixel) is at least this. A thin structure clears it; a blob
             does not. Second, independent elongation test.
+        min_skeleton_area_px: minimum component area for the skeleton-ratio test
+            to be trusted. Below it the ratio is unreliable (a tiny disc's
+            skeleton fills most of it), so eccentricity alone decides.
         return_removed: also return the mask of what was dropped, for inspection.
 
     Returns:
@@ -65,13 +69,18 @@ def reject_blobs(mask, um_per_px, max_blob_um=25.0, min_eccentricity=0.9,
 
     for region in regionprops(labels):
         component = labels == region.label
-        equiv_diameter = region.equivalent_diameter  # pixels
+        equiv_diameter = region.equivalent_diameter_area  # pixels
         big = equiv_diameter > max_blob_px
         elongated_ellipse = region.eccentricity >= min_eccentricity
 
+        # The skeleton ratio is only a meaningful elongation cue above a size
+        # floor: skeletonising a tiny disc leaves a skeleton almost as large as
+        # the disc (ratio -> 1), which would falsely read as "elongated" and keep
+        # small round debris. Below the floor, rely on eccentricity alone.
         skeleton_len = int(skeletonize(component).sum())
         skeleton_ratio = skeleton_len / max(region.area, 1)
-        elongated_skeleton = skeleton_ratio >= min_skeleton_ratio
+        elongated_skeleton = (region.area >= min_skeleton_area_px
+                              and skeleton_ratio >= min_skeleton_ratio)
 
         # Keep unless small AND round AND stubby.
         if big or elongated_ellipse or elongated_skeleton:

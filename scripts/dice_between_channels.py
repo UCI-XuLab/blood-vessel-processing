@@ -44,7 +44,9 @@ from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, calibrate_reference,  
                                  curated_paths, tissue_mask, vessel_mask)
 from vessel_utils import metrics                                                 # noqa: E402
 
-REGIONS = ("C", "T", "L")
+# TL included so thoracolumbar sections (e.g. M87) appear in the summary rather
+# than being scored into the CSV but silently dropped from the printed tables.
+REGIONS = ("C", "T", "L", "TL")
 LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 
 
