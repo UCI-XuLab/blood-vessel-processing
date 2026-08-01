@@ -148,6 +148,55 @@ def main():
     print("CD31 intensity. This is the same enrichment the mask-based measure")
     print("estimates, with the vessel-mask threshold replaced by an explicit sweep.")
 
+    plot_curves(sections, out / csv_path.name.replace(".csv", ".png"))
+
+
+def plot_curves(sections, png_path):
+    """Enrichment vs q, one panel per (figure, reporter): the result, visualised.
+
+    Each region is a line (mean across mice); individual mouse-means are faint
+    points, so both the regional separation and the between-animal spread are
+    visible. A line that stays below the others across the whole q-axis is the
+    robust part of the result.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    groups = sorted({(f, rep) for (f, rep, *_ ) in sections})
+    groups = [g for g in groups
+              if len([x for x in ("C", "T", "L")
+                      if any((*g, m, x, PERCENTILES[0]) in sections
+                             for (_f, _r, m, *_ ) in sections if (_f, _r) == g)]) >= 2]
+    if not groups:
+        return
+    colours = {"C": "#d1495b", "T": "#edae49", "L": "#00798c"}
+    fig, axes = plt.subplots(1, len(groups), figsize=(6.2 * len(groups), 5.2), squeeze=False)
+    for ax, (figure, reporter) in zip(axes[0], groups):
+        mice = sorted({m for (f, r, m, *_ ) in sections if (f, r) == (figure, reporter)})
+        for region in ("C", "T", "L"):
+            per_mouse = []
+            for mouse in mice:
+                vals = [np.mean(sections.get((figure, reporter, mouse, region, q), [np.nan]))
+                        for q in PERCENTILES]
+                if not np.all(np.isnan(vals)):
+                    per_mouse.append(vals)
+                    ax.plot(PERCENTILES, vals, color=colours[region], alpha=0.25, lw=1)
+            if per_mouse:
+                mean = np.nanmean(per_mouse, axis=0)
+                ax.plot(PERCENTILES, mean, color=colours[region], lw=2.5,
+                        marker="o", label=LONG[region])
+        ax.axhline(1.0, color="0.6", ls=":", lw=1)
+        ax.set_xlabel("top q% of CD31 called vessel")
+        ax.set_ylabel("virus enrichment (in-vessel / out)")
+        ax.set_title(f"{figure}  {reporter}   (n={len(mice)} mice)")
+        ax.legend(frameon=False)
+    fig.suptitle("Vascular enrichment without segmentation — lines that stay lowest "
+                 "across q are the robust result", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(png_path, dpi=110, bbox_inches="tight")
+    print(f"wrote {png_path}")
+
 
 if __name__ == "__main__":
     main()
