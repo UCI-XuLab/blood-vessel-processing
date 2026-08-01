@@ -47,14 +47,25 @@ LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 
 
 def enrichment_curve(virus, cd31, tissue):
-    """enrichment(q) for each q in PERCENTILES, on one section."""
+    """enrichment(q) for each q in PERCENTILES, on one section.
+
+    Guards against ties at the cutoff: a plateau of repeated CD31 values (from
+    quantised or saturated intensities) can make `>= cut` select far more than
+    q% of pixels, silently collapsing several q's onto the same selection and
+    faking "stability across q". Any q whose achieved fraction is more than 1.5x
+    the nominal is returned as nan rather than a misleading value.
+    """
     virus_t, cd31_t = virus[tissue], cd31[tissue]
+    total = virus_t.size
     out = {}
     for q in PERCENTILES:
         cut = np.percentile(cd31_t, 100 - q)
-        high = virus_t[cd31_t >= cut]
-        low = virus_t[cd31_t < cut]
-        out[q] = float(high.mean() / low.mean()) if high.size and low.size else float("nan")
+        selected = cd31_t >= cut
+        achieved = selected.sum() / total if total else 0.0
+        high, low = virus_t[selected], virus_t[~selected]
+        degenerate = achieved > 1.5 * (q / 100)      # a tie plateau blew up the top set
+        out[q] = (float(high.mean() / low.mean())
+                  if high.size and low.size and not degenerate else float("nan"))
     return out
 
 
@@ -126,11 +137,17 @@ def main():
             region_mean = {x: float(np.nanmean([mouse_mean(m, x, q) for m in mice]))
                            for x in regions}
             order = tuple(sorted(regions, key=lambda x: -region_mean[x]))
-            agree = sum(1 for m in mice
+            # Only mice with a value in every compared region vote on the ordering.
+            # A mouse missing a region would sort on a nan key, which leaves it in
+            # place and can spuriously "agree" with the canonical region order,
+            # inflating the count printed as evidence.
+            voters = [m for m in mice
+                      if all(not np.isnan(mouse_mean(m, x, q)) for x in regions)]
+            agree = sum(1 for m in voters
                         if tuple(sorted(regions, key=lambda x: -mouse_mean(m, x, q))) == order)
             orderings.add(order)
             print(f"{q:6d}%" + "".join(f"{region_mean[x]:11.3f}" for x in regions)
-                  + f"   {' > '.join(LONG[x][:4] for x in order):20s} {agree}/{len(mice)}")
+                  + f"   {' > '.join(LONG[x][:4] for x in order):20s} {agree}/{len(voters)}")
         print(f"\n  distinct orderings across the q-sweep: {len(orderings)}")
         if len(orderings) == 1:
             print("  -> stable: the regional ordering is a property of the data, not the")
