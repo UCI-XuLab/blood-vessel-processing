@@ -98,7 +98,22 @@ def tissue_mask(green, cd31):
     # 277x277 structuring element exhausts memory. The distance transform gives
     # the exact same result — every pixel within RIM_UM of the edge — in O(n).
     distance = ndi.distance_transform_edt(mask)
-    return mask & (distance > RIM_UM / UM_PER_PX)
+    core = mask & (distance > RIM_UM / UM_PER_PX)
+
+    # Fail loudly and clearly rather than hand a downstream percentile an empty
+    # array (which raises a cryptic "index -1 is out of bounds"). This happens
+    # when a section's intensity distribution defeats the triangle threshold —
+    # a few near-saturated pixels push it so high that genuine tissue falls below
+    # it. Observed on Fig 2b M87 slice6. A clip-before-threshold fix would rescue
+    # it but shifts every other section's mask by up to 25%, so the deliberate
+    # choice is to skip the unsegmentable section, not to change the threshold
+    # that works for the other 42.
+    if not core.any():
+        raise ValueError(
+            "empty tissue mask: the triangle threshold captured no tissue, "
+            "likely bright-outlier pixels skewing it. Section skipped."
+        )
+    return core
 
 
 def calibrate_reference(paths, n_sections=6):
@@ -119,14 +134,22 @@ def calibrate_reference(paths, n_sections=6):
     for path in chosen:
         stack = tifffile.imread(path)
         green, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
+        try:
+            tissue = tissue_mask(green, cd31)
+        except ValueError as error:
+            # A section the tissue threshold cannot handle must not take the whole
+            # calibration down with it; drop it and calibrate on the rest.
+            print(f"   {path.name[:46]:46s} skipped ({error})")
+            continue
         # Calibrate on the same normalised input the segmentation will see.
-        normalised = normalise_for_segmentation(cd31, tissue_mask(green, cd31))
+        normalised = normalise_for_segmentation(cd31, tissue)
         # A high quantile inside tissue, not the max: the max is set by one
         # bright structure and varied fourfold between sections of one cord.
         values.append(max_eigenvalue(normalised, SIGMAS, (UM_PER_PX, UM_PER_PX),
-                                     percentile=99.9,
-                                     mask=tissue_mask(green, cd31)))
+                                     percentile=99.9, mask=tissue))
         print(f"   {path.name[:46]:46s} lambda_max {values[-1]:9.1f}")
+    if not values:
+        raise ValueError("no section in the calibration sample had usable tissue")
     reference = float(np.median(values))
     print(f"   -> dataset reference_lambda = {reference:.1f} "
           f"(median of {len(values)}; spread {min(values):.0f}-{max(values):.0f})")
