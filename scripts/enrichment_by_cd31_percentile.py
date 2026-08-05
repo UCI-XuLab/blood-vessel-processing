@@ -44,6 +44,7 @@ from analyse_spinal_cord import NAME, curated_paths, tissue_mask   # noqa: E402
 PERCENTILES = (2, 5, 10, 20, 30)   # top-q% of CD31 called vessel
 REGIONS = ("C", "T", "L", "TL")
 LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
+VIRUS_K = 3.0   # virus-positive = parenchyma median + k*MAD (matches analyse_spinal_cord)
 
 
 def enrichment_curve(virus, cd31, tissue):
@@ -69,6 +70,36 @@ def enrichment_curve(virus, cd31, tissue):
     return out
 
 
+def coverage_curve(virus, cd31, tissue):
+    """coverage(q): fraction of the top-q% CD31 vessel area that is virus-positive.
+
+    The area companion to enrichment, on the SAME threshold-free CD31 vessel
+    geometry. Enrichment asks how much brighter the virus is on vessels; coverage
+    asks how much of the vasculature it actually reaches. A direct vessel
+    segmentation of the virus channel is not achievable (its off-vessel signal is
+    genuine neuronal expression, structurally vessel-like), so the vessel geometry
+    comes from CD31 and the virus only decides which of those vessels are labelled.
+
+    "Virus-positive" is the pipeline's per-image rule (parenchyma median +
+    VIRUS_K*MAD), so a per-section brightness gain does not move it. Reported per q
+    because "vessel" is the top-q% of CD31; the companion off-vessel area fraction
+    is dominated by the vast parenchyma and is deliberately not returned here.
+    """
+    out = {}
+    for q in PERCENTILES:
+        cut = np.percentile(cd31[tissue], 100 - q)
+        vessels = (cd31 >= cut) & tissue
+        parenchyma = tissue & ~vessels
+        if not vessels.any() or not parenchyma.any():
+            out[q] = float("nan")
+            continue
+        background = np.median(virus[parenchyma])
+        mad = 1.4826 * np.median(np.abs(virus[parenchyma] - background))
+        virus_positive = virus > background + VIRUS_K * mad
+        out[q] = float((virus_positive & vessels).sum() / vessels.sum())
+    return out
+
+
 def main():
     full = "--full" in sys.argv
     paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=3)
@@ -89,11 +120,14 @@ def main():
             print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
             continue
         curve = enrichment_curve(virus, cd31, tissue)
+        cover = coverage_curve(virus, cd31, tissue)
         rows.append({"figure": figure, "reporter": reporter, "mouse": mouse,
                      "region": region, "slice": slice_id or "",
-                     **{f"enrich_top{q}": curve[q] for q in PERCENTILES}})
+                     **{f"enrich_top{q}": curve[q] for q in PERCENTILES},
+                     **{f"cover_top{q}": cover[q] for q in PERCENTILES}})
         print(f"[{index:2d}/{len(paths)}] {figure} {reporter:5s} {mouse:7s} {region:2s}  "
-              + "  ".join(f"q{q}={curve[q]:.2f}" for q in PERCENTILES))
+              + "enrich " + " ".join(f"q{q}={curve[q]:.2f}" for q in PERCENTILES)
+              + f"   cover@5%={cover[5]:.2f}")
 
     if not rows:
         sys.exit("no sections scored")
@@ -109,10 +143,12 @@ def main():
 
     # sections[(figure, reporter, mouse, region, q)] -> list of per-slice values.
     sections = defaultdict(list)
+    cover_sections = defaultdict(list)
     for r in rows:
         for q in PERCENTILES:
-            sections[(r["figure"], r["reporter"], r["mouse"], r["region"], q)].append(
-                r[f"enrich_top{q}"])
+            key = (r["figure"], r["reporter"], r["mouse"], r["region"], q)
+            sections[key].append(r[f"enrich_top{q}"])
+            cover_sections[key].append(r[f"cover_top{q}"])
 
     groups = sorted({(f, rep) for (f, rep, *_ ) in sections})
     for figure, reporter in groups:
@@ -125,6 +161,11 @@ def main():
         def mouse_mean(mouse, region, q):
             """Average slices for one mouse x region at percentile q."""
             vals = sections.get((figure, reporter, mouse, region, q), [])
+            return float(np.mean(vals)) if vals else float("nan")
+
+        def cover_mean(mouse, region, q):
+            """Average coverage over slices for one mouse x region at percentile q."""
+            vals = cover_sections.get((figure, reporter, mouse, region, q), [])
             return float(np.mean(vals)) if vals else float("nan")
 
         print("\n" + "=" * 74)
@@ -159,6 +200,15 @@ def main():
                       " every q -- that part is safe to claim.")
             else:
                 print("  -> ordering not stable across q; no safe regional claim.")
+
+        # Coverage: the area companion. How much of the CD31 vasculature the virus
+        # actually reaches (virus-positive), on the same top-q% vessel definition.
+        print("\n  coverage (virus-positive fraction of the top-q% CD31 vessels):")
+        for q in (5, 10):
+            per_region = {x: float(np.nanmean([cover_mean(m, x, q) for m in mice]))
+                          for x in regions}
+            print(f"    top-{q:2d}%: "
+                  + "   ".join(f"{LONG[x]} {per_region[x]:.3f}" for x in regions))
 
     print("\n" + "=" * 74)
     print("No segmentation, no filter, no operating point: virus intensity ranked by")
