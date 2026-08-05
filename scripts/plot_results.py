@@ -81,12 +81,17 @@ def regions_present(per_mouse):
     return [r for r in REGION_ORDER if r in present]
 
 
-def fig_enrichment_by_region(rows):
-    """Enrichment per region at the headline q, mouse points over the group mean."""
+def _by_region_figure(rows, value_of, ylabel, suptitle, stem, hline=1.0):
+    """Per-region metric at the headline q: mouse points over the group mean ± sd.
+
+    Slices are already collapsed inside mouse_region, so each faint line is one
+    animal and the diamonds are the across-mouse mean. Shared by the enrichment
+    and coverage figures — the same aggregation, a different column.
+    """
     fig, axes = plt.subplots(1, len(REPORTERS), figsize=(6.4 * len(REPORTERS), 5.4),
                              squeeze=False)
     for ax, reporter in zip(axes[0], REPORTERS):
-        per_mouse = mouse_region(rows, reporter, lambda r: float(r[f"enrich_top{HEADLINE_Q}"]))
+        per_mouse = mouse_region(rows, reporter, value_of)
         regions = regions_present(per_mouse)
         if not regions:
             ax.axis("off"); continue
@@ -101,15 +106,36 @@ def fig_enrichment_by_region(rows):
         sds = [np.nanstd([per_mouse[m].get(r, np.nan) for m in mice]) for r in regions]
         ax.errorbar(xs, means, yerr=sds, fmt="D", ms=10, lw=2, capsize=6,
                     color="#2b2b2b", zorder=5, label="mouse mean ± sd")
-        ax.axhline(1.0, color="0.7", ls=":", lw=1)
+        if hline is not None:
+            ax.axhline(hline, color="0.7", ls=":", lw=1)
         ax.set_xticks(xs)
         ax.set_xticklabels([LONG[r] for r in regions])
-        ax.set_ylabel(f"virus enrichment (top-{HEADLINE_Q}% CD31)")
+        ax.set_ylabel(ylabel)
         ax.set_title(f"{reporter}   (n={len(mice)} mice)")
         ax.legend(frameon=False, fontsize=8)
-    fig.suptitle("Virus vascular enrichment by spinal-cord region "
-                 "— lumbar is lowest in every mouse", fontsize=13)
-    _save(fig, "fig_enrichment_by_region")
+    fig.suptitle(suptitle, fontsize=13)
+    _save(fig, stem)
+
+
+def fig_enrichment_by_region(rows):
+    """Enrichment per region at the headline q, mouse points over the group mean."""
+    _by_region_figure(
+        rows, lambda r: float(r[f"enrich_top{HEADLINE_Q}"]),
+        f"virus enrichment (top-{HEADLINE_Q}% CD31)",
+        "Virus vascular enrichment by spinal-cord region — lumbar is lowest in every mouse",
+        "fig_enrichment_by_region")
+
+
+def fig_coverage_by_region(rows):
+    """Coverage (virus-positive fraction of the vessels) per region, the area companion."""
+    if not any(f"cover_top{HEADLINE_Q}" in r for r in rows):
+        print("   (skipping coverage figure: CSV predates the coverage columns)")
+        return
+    _by_region_figure(
+        rows, lambda r: float(r[f"cover_top{HEADLINE_Q}"]),
+        f"virus coverage (fraction of top-{HEADLINE_Q}% CD31 vessels)",
+        "Virus coverage of the vasculature by region — SYFP2 lumbar reaches the fewest vessels",
+        "fig_coverage_by_region", hline=None)
 
 
 def fig_enrichment_vs_q(rows):
@@ -197,6 +223,7 @@ def main():
                  "run scripts/enrichment_by_cd31_percentile.py --full first")
     print(f"{len(pct_rows)} percentile rows, {len(mask_rows)} mask rows\n")
     fig_enrichment_by_region(pct_rows)
+    fig_coverage_by_region(pct_rows)
     fig_enrichment_vs_q(pct_rows)
     fig_method_agreement(pct_rows, mask_rows)
 
