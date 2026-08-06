@@ -24,7 +24,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+# Everything needed to run the tests AND the analysis notebooks/scripts, so that
+# `pip install -e ".[dev]"` into a fresh venv gives a complete environment.
+dev = [
+    "pytest",
+    "pandas",       # the analysis notebooks
+    "jupyterlab",   # run the notebooks
+    "nbconvert",    # execute notebooks headlessly
+    "nbclient",
+    "ipykernel",
+]
 
 [tool.setuptools]
 packages = ["velazquez_rivera_2025", "vessel_utils"]
