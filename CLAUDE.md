@@ -14,12 +14,23 @@ Three parts:
 
 ## Commands
 
+Everything runs off a project virtual environment. Create it once, then install
+the `[dev]` extra — that pulls the runtime deps, the test tooling, and the
+notebook tooling (pandas, jupyterlab, nbconvert/nbclient/ipykernel), so a fresh
+`.venv` can run the scripts, the tests, and the notebooks:
+
 ```bash
-pip install -e .                    # optional; notebooks bootstrap sys.path without it
-pip install -e ".[dev]" && pytest   # run the test suite
+python -m venv .venv                          # create the project venv (.venv is gitignored)
+.venv\Scripts\activate                        # Windows  (source .venv/bin/activate on Unix)
+pip install -e ".[dev]"                       # install everything: deps, tests, notebooks
+pytest                                         # run the test suite
 pytest tests/test_equivalence.py -k detect_vessels    # a single test
-jupyter lab                         # run the notebooks
+jupyter lab                                    # run the notebooks
 ```
+
+`pip install -e .` (without `[dev]`) is enough just to import `vessel_utils`; the
+notebooks also bootstrap `sys.path`, so they import the packages without any
+install.
 
 The notebooks cannot be executed from a fresh clone: paths are hardcoded to `/media/data/u01/...` on the lab's Linux workstation and the imaging data is not in the repository. Anything you change must be verified through the test suite instead.
 
