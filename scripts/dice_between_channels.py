@@ -65,7 +65,7 @@ LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 # not saturated, so the hysteresis thresholds actually bite. CD31 gets a vessel-
 # like cut; the virus gets a stricter one to keep only vessel-associated signal.
 REFERENCE = 2.5
-CD31_LOW, CD31_HIGH = 0.05, 0.16
+CD31_LOW, CD31_HIGH = 0.04, 0.13
 VIRUS_LOW, VIRUS_HIGH = 0.08, 0.22
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 
