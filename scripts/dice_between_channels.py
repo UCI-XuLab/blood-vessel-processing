@@ -15,7 +15,7 @@ channels get DIFFERENT thresholds on purpose:
     cut (VIRUS_LOW/VIRUS_HIGH) keeps only the brightest vesselness responses —
     which are the genuinely vessel-associated virus — and discards the dimmer
     neuronal ridge signal. On a test section this raised specificity against CD31
-    from ~0.49 (at CD31's own cut) to ~0.62, without inventing vessels.
+    from ~0.5 (at CD31's own cut) to ~0.6, without inventing vessels.
 
 Segmenting each channel as well as it can be, then comparing, replaces the older
 "same filter on both channels so it cancels" symmetry. That only looked clean
@@ -65,8 +65,8 @@ LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 # not saturated, so the hysteresis thresholds actually bite. CD31 gets a vessel-
 # like cut; the virus gets a stricter one to keep only vessel-associated signal.
 REFERENCE = 2.5
-CD31_LOW, CD31_HIGH = 0.06, 0.20
-VIRUS_LOW, VIRUS_HIGH = 0.12, 0.30
+CD31_LOW, CD31_HIGH = 0.05, 0.16
+VIRUS_LOW, VIRUS_HIGH = 0.08, 0.22
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 
 
