@@ -36,7 +36,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analyse_spinal_cord import NAME, REGION_NAME, curated_paths, tissue_mask  # noqa: E402
-from enrichment_by_cd31_percentile import PERCENTILES, enrichment_curve         # noqa: E402
+# top_q_mask lives in enrichment_by_cd31_percentile (the metric and the visuals must
+# use the same speck-cleaned mask); re-exported here so downstream scripts that do
+# `from visualize_sections import top_q_mask` keep working.
+from enrichment_by_cd31_percentile import (PERCENTILES, enrichment_curve,       # noqa: E402,F401
+                                           top_q_mask)
 
 DS = 2            # display downsample; QC panels do not need full resolution
 THUMB_PX = 240    # target height of each contact-sheet tile
@@ -48,12 +52,6 @@ def _clip(channel, tissue):
     """Channel scaled to its in-tissue 1st-99th percentiles, for display only."""
     lo, hi = np.percentile(channel[tissue], [1, 99])
     return np.clip((channel - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
-
-
-def top_q_mask(cd31, tissue, q):
-    """The top-q% of CD31 intensity within tissue — the vessel definition."""
-    cut = np.percentile(cd31[tissue], 100 - q)
-    return (cd31 >= cut) & tissue
 
 
 def _result_rgb(green, tissue, vessels):

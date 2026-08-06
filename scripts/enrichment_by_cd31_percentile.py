@@ -35,35 +35,50 @@ from pathlib import Path
 
 import numpy as np
 import tifffile
+from skimage.morphology import remove_small_objects
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import NAME, curated_paths, tissue_mask   # noqa: E402
+from analyse_spinal_cord import NAME, UM_PER_PX, curated_paths, tissue_mask   # noqa: E402
 
 PERCENTILES = (2, 5, 10, 20, 30)   # top-q% of CD31 called vessel
 REGIONS = ("C", "T", "L", "TL")
 LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 VIRUS_K = 3.0   # virus-positive = parenchyma median + k*MAD (matches analyse_spinal_cord)
+# Speck cleanup: drop connected components smaller than ~8 µm² (below a capillary
+# cross-section), so isolated bright-CD31 noise pixels are not counted as vessel.
+# On a clean section this changes the vessel area negligibly (0.1186 -> 0.1182);
+# on a noisy-CD31 section it removes thousands of single-pixel specks.
+MIN_SPECK_PX = int(round(8.0 / UM_PER_PX ** 2))
+
+
+def top_q_mask(cd31, tissue, q):
+    """The top-q% of CD31 intensity within tissue, speck-cleaned.
+
+    This is THE vessel definition for the percentile method — enrichment,
+    coverage and every percentile visual (visualize_sections re-exports it) go
+    through it, so the number and the picture always use the same mask.
+    """
+    cut = np.percentile(cd31[tissue], 100 - q)
+    return remove_small_objects((cd31 >= cut) & tissue, min_size=MIN_SPECK_PX)
 
 
 def enrichment_curve(virus, cd31, tissue):
     """enrichment(q) for each q in PERCENTILES, on one section.
 
     Guards against ties at the cutoff: a plateau of repeated CD31 values (from
-    quantised or saturated intensities) can make `>= cut` select far more than
+    quantised or saturated intensities) can make the top set select far more than
     q% of pixels, silently collapsing several q's onto the same selection and
     faking "stability across q". Any q whose achieved fraction is more than 1.5x
     the nominal is returned as nan rather than a misleading value.
     """
-    virus_t, cd31_t = virus[tissue], cd31[tissue]
-    total = virus_t.size
+    total = int(tissue.sum())
     out = {}
     for q in PERCENTILES:
-        cut = np.percentile(cd31_t, 100 - q)
-        selected = cd31_t >= cut
-        achieved = selected.sum() / total if total else 0.0
-        high, low = virus_t[selected], virus_t[~selected]
+        vessels = top_q_mask(cd31, tissue, q)
+        achieved = vessels.sum() / total if total else 0.0
+        high, low = virus[vessels], virus[tissue & ~vessels]
         degenerate = achieved > 1.5 * (q / 100)      # a tie plateau blew up the top set
         out[q] = (float(high.mean() / low.mean())
                   if high.size and low.size and not degenerate else float("nan"))
@@ -87,8 +102,7 @@ def coverage_curve(virus, cd31, tissue):
     """
     out = {}
     for q in PERCENTILES:
-        cut = np.percentile(cd31[tissue], 100 - q)
-        vessels = (cd31 >= cut) & tissue
+        vessels = top_q_mask(cd31, tissue, q)
         parenchyma = tissue & ~vessels
         if not vessels.any() or not parenchyma.any():
             out[q] = float("nan")
