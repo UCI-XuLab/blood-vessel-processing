@@ -40,7 +40,8 @@ from enrichment_by_cd31_percentile import PERCENTILES, enrichment_curve         
 
 DS = 2            # display downsample; QC panels do not need full resolution
 THUMB_PX = 240    # target height of each contact-sheet tile
-VIS_Q = 5         # the percentile whose vessel mask is drawn; all q's in the title
+VIS_Q = 10        # the percentile whose vessel mask is drawn; all q's in the title
+                  # (top-5% undersegments — misses dim vessels; top-10% traces the network)
 
 
 def _clip(channel, tissue):
