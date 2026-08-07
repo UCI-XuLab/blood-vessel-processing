@@ -22,9 +22,11 @@ The masks are recomputed here (not just copied) so the package carries the
 actual boolean segmentations, not only their renderings. Reads Z: read-only.
 """
 
+import csv
 import shutil
 import subprocess
 import sys
+from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -178,7 +180,9 @@ ordering — more tdT animals is the main gap. See `figures/fig_enrichment_by_re
    `specificity` = |virus∩CD31|/|virus| (how much of the virus mask sits on a
    vessel); `coverage` = |virus∩CD31|/|CD31| (how much vasculature the virus
    reaches). The virus mask is deliberately uncleaned — its off-vessel signal is
-   the vector's non-specificity, not an error.
+   the vector's non-specificity, not an error. `metrics/dice_summary.csv`
+   aggregates this per region under the paper-1 names (Dice, IoU, precision =
+   specificity, recall = coverage).
 
 ## Segmentations (`segmentations/`)
 
@@ -242,7 +246,7 @@ Two rendered views of the same masks over the section images:
 
 ```
 metrics/       enrichment_by_cd31_percentile.csv, dice_between_channels.csv,
-               DATA_DICTIONARY.md
+               dice_summary.csv (aggregated, paper-1 names), DATA_DICTIONARY.md
 figures/       fig_enrichment_by_region, fig_coverage_by_region,
                fig_enrichment_vs_q, fig_method_agreement (each PNG + PDF),
                enrichment_curves.png
@@ -259,6 +263,39 @@ in the source repository.
         text += "\n## Sections skipped during export\n\n" + \
             "\n".join(f"- {stem}: {why}" for stem, why in skipped) + "\n"
     readme_path.write_text(text, encoding="utf-8")
+
+
+def write_dice_summary(dice_csv, out_path):
+    """Aggregate the per-section dice CSV into a summary with paper-1 metric names.
+
+    Nested aggregation: average slices within mouse x region first, then average
+    across mice, so each animal counts once regardless of its slice count. Columns
+    use the paper-1 names (iou = jaccard, precision = specificity, recall =
+    coverage) so a collaborator reading paper-1 terms finds them directly.
+    """
+    rows = list(csv.DictReader(open(dice_csv, newline="", encoding="utf-8")))
+    src = {"dice": "dice", "iou": "jaccard", "precision": "specificity",
+           "recall": "coverage"}
+    by_region = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        by_region[(r["figure"], r["reporter"], r["region"])][r["mouse"]].append(r)
+
+    out = []
+    for (figure, reporter, region), mice in sorted(by_region.items()):
+        rec = {"figure": figure, "reporter": reporter, "region": region,
+               "n_mice": len(mice), "n_slices": sum(len(v) for v in mice.values())}
+        for name, col in src.items():
+            mouse_means = [np.mean([float(s[col]) for s in v]) for v in mice.values()]
+            rec[name] = round(float(np.mean(mouse_means)), 4)
+        out.append(rec)
+
+    with open(out_path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[
+            "figure", "reporter", "region", "n_mice", "n_slices",
+            "dice", "iou", "precision", "recall"])
+        writer.writeheader()
+        writer.writerows(out)
+    return len(out)
 
 
 def write_data_dictionary(path):
@@ -286,6 +323,19 @@ Both CSVs carry identifier columns `figure`, `reporter`, `mouse`, `region`
 
 Directional pair (`specificity`, `coverage`) is more interpretable than `dice`
 alone. With few mice, read direction-consistency across animals, not p-values.
+
+## dice_summary.csv  (paper-1 metric names)
+
+The dice CSV aggregated per `figure` x `reporter` x `region`, with the paper-1
+names. `n_mice`, `n_slices` give the support. Nested aggregation: slices are
+averaged within mouse x region first, then across mice.
+
+| column | = |
+|--------|---|
+| `dice` | Dice |
+| `iou` | Jaccard / IoU |
+| `precision` | `specificity` above — \\|virus ∩ CD31\\| / \\|virus\\| |
+| `recall` | `coverage` above — \\|virus ∩ CD31\\| / \\|CD31\\| |
 """, encoding="utf-8")
 
 
@@ -304,6 +354,8 @@ def main():
              "enrichment_by_cd31_percentile.csv")
     copy_one(RESULTS / "dice_between_channels_full.csv", OUT / "metrics",
              "dice_between_channels.csv")
+    write_dice_summary(OUT / "metrics" / "dice_between_channels.csv",
+                       OUT / "metrics" / "dice_summary.csv")
     write_data_dictionary(OUT / "metrics" / "DATA_DICTIONARY.md")
 
     print("figures ...")
