@@ -16,7 +16,7 @@ import io as _io
 import numpy as np
 import pytest
 
-import velazquez_rivera_2025 as archive
+import archive.velazquez_rivera_2025 as archive
 from tests import baseline
 
 SEED = 20260729

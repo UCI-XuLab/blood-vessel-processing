@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-import velazquez_rivera_2025 as archive
+import archive.velazquez_rivera_2025 as archive
 from tests import baseline
 
 REPO = Path(__file__).resolve().parent.parent

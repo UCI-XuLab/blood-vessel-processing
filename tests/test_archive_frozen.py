@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-ARCHIVE = Path(__file__).resolve().parent.parent / "velazquez_rivera_2025"
+ARCHIVE = Path(__file__).resolve().parent.parent / "archive" / "velazquez_rivera_2025"
 
 MANIFEST = {
     "__init__.py": "9e1649c9560ce01886a1820759725138a6a5adefd6c02b19827e366667848d25",

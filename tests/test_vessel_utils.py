@@ -257,7 +257,7 @@ def test_jaccard_is_dtype_independent():
     numeric = metrics.jaccard(a.astype(float), b.astype(float))
     assert boolean == pytest.approx(numeric)
 
-    from velazquez_rivera_2025.metrics import iou as archive_iou
+    from archive.velazquez_rivera_2025.metrics import iou as archive_iou
     assert archive_iou(a, b) == pytest.approx(boolean, abs=1e-6)      # agrees on bool
     assert archive_iou(a.astype(float), b.astype(float)) != pytest.approx(boolean)
 

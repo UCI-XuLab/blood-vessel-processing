@@ -36,7 +36,10 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["velazquez_rivera_2025", "vessel_utils", "vessel_utils._vendor"]
+# The published archive now lives under archive/velazquez_rivera_2025 as
+# reference code (imported in tests via the repo root, verified frozen by
+# tests/test_archive_frozen.py); it is no longer a shipped package.
+packages = ["vessel_utils", "vessel_utils._vendor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
