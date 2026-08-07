@@ -64,9 +64,9 @@ LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 # Per-channel Jerman operating points (see module docstring). REFERENCE is graded,
 # not saturated, so the hysteresis thresholds actually bite. CD31 gets a vessel-
 # like cut; the virus gets a stricter one to keep only vessel-associated signal.
-REFERENCE = 2.5
-CD31_LOW, CD31_HIGH = 0.035, 0.11
-VIRUS_LOW, VIRUS_HIGH = 0.08, 0.22
+REFERENCE = 2.0
+CD31_LOW, CD31_HIGH = 0.03, 0.09
+VIRUS_LOW, VIRUS_HIGH = 0.06, 0.17
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 
 
