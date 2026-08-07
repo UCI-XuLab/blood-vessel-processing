@@ -36,7 +36,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["velazquez_rivera_2025", "vessel_utils"]
+packages = ["velazquez_rivera_2025", "vessel_utils", "vessel_utils._vendor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

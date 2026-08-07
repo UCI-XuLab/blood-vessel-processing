@@ -33,28 +33,29 @@ The virus threshold is set per image from the non-vessel tissue itself
 (median + k*MAD), because the README notes brightness was adjusted per image; a
 fixed absolute cut would confound acquisition settings with biology.
 
-Artefact handling, all from the dataset README:
-  - a 90 um rim is removed from the tissue mask, dropping the edge staining artefacts
-  - the tissue mask excludes the black background and the rotated-composite corners
+Artefact handling:
+  - the tissue mask (see tissue_mask) is an entropy-guided GrabCut silhouette that
+    excludes the black background and the rotated-composite corners
+  - the bright pial edge is kept, not eroded: dropping a fixed rim also dropped real
+    near-edge vessels, so the edge staining is accepted instead of a rim erosion
   - grey-matter background is *not* removed: it is the leak being measured, and
     it is why off_target is reported separately rather than folded into a score
 """
 
 import csv
+import hashlib
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-import scipy.ndimage as ndi
 import tifffile
-from skimage.filters import threshold_triangle
-from skimage.morphology import binary_erosion, disk, remove_small_holes
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vessel_utils import metrics                                   # noqa: E402
+from vessel_utils._vendor import compute_entropy_grabcut, EntropyGrabCutConfig  # noqa: E402
 from vessel_utils.threshold import segment                         # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue  # noqa: E402
 
@@ -71,8 +72,6 @@ SIGMAS = [1.5, 3.0, 6.0, 12.0]   # um, capillary through venule radius
 # do different jobs and are set independently, not as a ratio.
 VESSEL_HIGH = 0.15            # seed: confident vessel in the Jerman response
 VESSEL_LOW = 0.02            # grow: ~2x the response noise floor
-RIM_UM = 90.0                # eroded off the tissue edge; 40 um left pial
-                             # staining in, which dominated the density map
 MIN_VESSEL_UM2 = 6.0
 VIRUS_K = 3.0                 # virus-positive = background median + k * MAD
 
@@ -80,40 +79,47 @@ NAME = re.compile(r"^(Fig \d\w*)_([\w\-]+)_(C|T|L|TL)_(.+?)_CD31-mag(?:_slice(\d
 REGION_NAME = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 
 
+# Tissue mask via the vendored entropy-guided GrabCut masker (see vessel_utils/_vendor).
+# The default config is the upstream benchmark: percentile 1-99.5 normalize +
+# Multi-Otsu-4 seed. Construct once and reuse.
+_GRABCUT = EntropyGrabCutConfig()
+_MASK_CACHE = Path(__file__).resolve().parent.parent / "results" / "tissue_masks"
+_MASK_CACHE_VERSION = "grabcut-9f2e5fb"   # bump (or delete the dir) to invalidate
+
+
 def tissue_mask(green, cd31):
-    """Section outline with the edge rim removed.
+    """Section silhouette from the vendored entropy-guided GrabCut masker.
 
-    Thresholding the channel sum keeps tissue that is bright in either channel.
-    The largest connected component drops debris; the erosion drops the bright
-    edge staining the README warns about, which would otherwise read as signal.
+    Tissue is whatever is bright in either channel, so the masker runs on the
+    channel sum. Its seed uses a local-entropy channel, so it rejects the flat
+    background haze a pure-intensity threshold leaks into, and it keeps every
+    component >= 1% of the largest — so a section torn during histology stays whole
+    rather than losing every piece but the biggest. It draws the true tissue edge
+    INCLUDING the bright pial rim: the earlier 90 um rim erosion is gone by choice,
+    since it also dropped real near-edge vessels, so the edge staining is accepted
+    in exchange. This also removed the old triangle threshold's failure on sections
+    whose bright outliers defeated it (e.g. Fig 2b M87 slice6, previously skipped),
+    which GrabCut's percentile-normalised, entropy-guided seed handles.
+
+    GrabCut is deterministic, so masks are cached on disk, content-addressed on the
+    channel sum. Delete results/tissue_masks/ (or bump _MASK_CACHE_VERSION) to
+    recompute — e.g. after re-syncing the vendored masker.
     """
-    total = green + cd31
-    mask = total > threshold_triangle(total)
-    mask = remove_small_holes(mask, area_threshold=200_000)
-    labels, count = ndi.label(mask)
-    if count:
-        mask = labels == (np.bincount(labels.ravel())[1:].argmax() + 1)
-    # Remove a rim of RIM_UM via the distance transform, not a disk erosion: a
-    # 90 um rim is a disk of radius ~138 px, and eroding a 2000x3000 image with a
-    # 277x277 structuring element exhausts memory. The distance transform gives
-    # the exact same result — every pixel within RIM_UM of the edge — in O(n).
-    distance = ndi.distance_transform_edt(mask)
-    core = mask & (distance > RIM_UM / UM_PER_PX)
+    total = np.ascontiguousarray(
+        np.asarray(green, np.float32) + np.asarray(cd31, np.float32))
+    key = hashlib.blake2b(total.tobytes(), digest_size=16).hexdigest()
+    cache_file = _MASK_CACHE / f"{_MASK_CACHE_VERSION}_{key}.npy"
+    if cache_file.exists():
+        return np.load(cache_file)
 
-    # Fail loudly and clearly rather than hand a downstream percentile an empty
-    # array (which raises a cryptic "index -1 is out of bounds"). This happens
-    # when a section's intensity distribution defeats the triangle threshold —
-    # a few near-saturated pixels push it so high that genuine tissue falls below
-    # it. Observed on Fig 2b M87 slice6. A clip-before-threshold fix would rescue
-    # it but shifts every other section's mask by up to 25%, so the deliberate
-    # choice is to skip the unsegmentable section, not to change the threshold
-    # that works for the other 42.
-    if not core.any():
+    mask = compute_entropy_grabcut(total, polarity="bright", config=_GRABCUT).mask
+    if not mask.any():
         raise ValueError(
-            "empty tissue mask: the triangle threshold captured no tissue, "
-            "likely bright-outlier pixels skewing it. Section skipped."
+            "empty tissue mask: GrabCut found no foreground (near-blank section)."
         )
-    return core
+    _MASK_CACHE.mkdir(parents=True, exist_ok=True)
+    np.save(cache_file, mask)
+    return mask
 
 
 def calibrate_reference(paths, n_sections=6):
