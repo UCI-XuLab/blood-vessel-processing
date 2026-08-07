@@ -66,7 +66,9 @@ LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 # like cut; the virus gets a stricter one to keep only vessel-associated signal.
 REFERENCE = 2.0
 CD31_LOW, CD31_HIGH = 0.03, 0.09
-VIRUS_LOW, VIRUS_HIGH = 0.06, 0.17
+VIRUS_LOW, VIRUS_HIGH = 0.04, 0.12   # loosened from 0.06/0.17: caught more of the
+                                     # dim tdT vessels missed in M63/M87, while
+                                     # staying stricter than CD31's cut above
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 
 
