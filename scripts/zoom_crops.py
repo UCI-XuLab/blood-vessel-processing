@@ -176,7 +176,7 @@ def section_figure(green, cd31, tissue, vessels, centres, title, png_path):
         axes[2].imshow(_merge_rgb(gc, cc))
         if vc.any():
             axes[2].contour(vc.astype(float), levels=[0.5], colors="#ffea00",
-                            linewidths=0.5)
+                            linewidths=0.35)
         _add_scalebar(axes[2])
         if i == 0:
             axes[0].set_title("virus", fontsize=10)
