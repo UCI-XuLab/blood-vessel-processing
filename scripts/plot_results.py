@@ -37,7 +37,7 @@ PERCENTILE_CSV = RESULTS / "enrichment_cd31_percentile_full.csv"
 MASK_CSV = RESULTS / "spinal_cord_specificity.csv"
 
 QS = (2, 5, 10, 20, 30)
-HEADLINE_Q = 20   # top-5/10% undersegment (miss dim vessels); top-20% captures them
+HEADLINE_Q = 10   # representative percentile for the headline region plots
 REGION_ORDER = ("C", "T", "L", "TL")
 LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 COLOUR = {"C": "#d1495b", "T": "#edae49", "L": "#00798c", "TL": "#6b6b6b"}
