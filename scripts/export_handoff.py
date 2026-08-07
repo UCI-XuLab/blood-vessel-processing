@@ -6,17 +6,20 @@ Bundles everything a collaborator needs to re-analyse or re-visualise the
 spinal-cord vascular-specificity results WITHOUT the raw imaging data (which
 stays read-only on Z:) and without this repo's environment:
 
-  metrics/         the two measure CSVs + a column dictionary
-  figures/         the publication result plots (PNG + PDF)
+  metrics/         the two measure CSVs, a summary, and a column dictionary
+  figures/         the enrichment / coverage result plots (PNG + PDF)
   segmentations/
-      masks/       per-section 4-channel mask TIFs (tissue, CD31 vessel,
-                   virus vessel, CD31 top-20%) for re-analysis in any tool
-      contours/    per-section contour JPGs (visual QC of the masks)
-  visualization/   section panels, 800 um zoom crops, virus-vasculature
-                   panels, and the contact-sheet overviews
-  notebooks/       the two executed analysis notebooks (figures embedded)
+      masks/            per-section 4-channel mask TIFs (tissue, CD31 vessel,
+                        virus vessel, CD31 top-percentile) for re-analysis
+      section_overlays/ per-section JPG: each channel + its Jerman vessel
+                        contour (CD31 ground truth magenta, virus green)
+      contours/         per-section full-res Jerman contour JPG, both channels
   README.md        dataset, methods, every parameter, the finding, a file
                    guide, how to load the masks, and the caveats
+
+Segmentation figures show the Jerman contours only; the top-q% percentile mask
+is kept as mask-channel 3 (it is the primary-measure vessel definition) but is
+not drawn as a contour.
 
 The masks are recomputed here (not just copied) so the package carries the
 actual boolean segmentations, not only their renderings. Reads Z: read-only.
@@ -48,7 +51,7 @@ RESULTS = REPO / "results"
 OUT = RESULTS / "handoff"
 
 # Mask channels, in the order they are written into each section's TIF.
-MASK_CHANNELS = ["tissue", "cd31_vessel", "virus_vessel", "cd31_top20pct"]
+MASK_CHANNELS = ["tissue", "cd31_vessel", "virus_vessel", f"cd31_top{VIS_Q}pct"]
 
 
 def clean_stem(path):
@@ -67,10 +70,11 @@ def git_commit():
         return "unknown"
 
 
-def render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, cd31_top, title, out_path):
-    """Section with its vessel segmentation drawn on top, as a high-quality JPG:
-    each channel grayscale with its own vessel-mask contour (thin, so the vessels
-    stay visible). Downsampled 2x; JPG (q92) keeps each file well under 1 MB."""
+def render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, title, out_path):
+    """Section with its Jerman vessel segmentation drawn on top, as a high-quality
+    JPG: each channel grayscale with its Jerman vessel contour — CD31, the ground
+    truth, in magenta; virus in green (thin, so the vessels stay visible).
+    Downsampled 2x; JPG (q92) keeps each file well under 1 MB."""
     d = np.s_[::2, ::2]
 
     def grey(channel):
@@ -79,12 +83,11 @@ def render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, cd31_top, title, ou
 
     fig, ax = plt.subplots(1, 2, figsize=(17, 8.5))
     ax[0].imshow(grey(cd31), cmap="gray")
-    ax[0].contour(cd31_ves[d].astype(float), [0.5], colors="#00e5ff", linewidths=0.5)
-    ax[0].contour(cd31_top[d].astype(float), [0.5], colors="#ffb000", linewidths=0.4)
-    ax[0].set_title("CD31 + vessel mask (cyan) + top-20% (amber)", fontsize=11)
+    ax[0].contour(cd31_ves[d].astype(float), [0.5], colors="#ff36ff", linewidths=0.5)
+    ax[0].set_title("CD31 ground truth + Jerman vessel mask (magenta)", fontsize=11)
     ax[1].imshow(grey(virus), cmap="gray")
     ax[1].contour(virus_ves[d].astype(float), [0.5], colors="#39ff14", linewidths=0.5)
-    ax[1].set_title("virus + vessel mask (green)", fontsize=11)
+    ax[1].set_title("virus + Jerman vessel mask (green)", fontsize=11)
     for a in ax:
         a.set_xticks([]); a.set_yticks([])
     fig.suptitle(title, fontsize=13)
@@ -114,7 +117,7 @@ def export_masks(mask_dir, overlay_dir):
         stack = np.stack([tissue, cd31_ves, virus_ves, cd31_top]).astype(np.uint8) * 255
         tifffile.imwrite(mask_dir / f"{stem}_masks.tif", stack,
                          compression="zlib", metadata={"axes": "CYX"})
-        render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, cd31_top, stem,
+        render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, stem,
                        overlay_dir / f"{stem}_overlay.jpg")
         written += 1
         print(f"[{index:2d}/{len(paths)}] {stem}  ({stack.shape[2]}x{stack.shape[1]})")
@@ -194,23 +197,24 @@ same H×W as the source. Channel order (axis 'C'):
 | 0 | `tissue` | entropy-guided GrabCut silhouette of the section |
 | 1 | `cd31_vessel` | CD31 graded-Jerman vessel mask, hysteresis {CD31_LOW}/{CD31_HIGH} |
 | 2 | `virus_vessel` | virus graded-Jerman vessel mask, hysteresis {VIRUS_LOW}/{VIRUS_HIGH} |
-| 3 | `cd31_top20pct` | CD31 top-{VIS_Q}% percentile mask (the primary-measure "vessel") |
+| 3 | `cd31_top{VIS_Q}pct` | CD31 top-{VIS_Q}% percentile mask (the primary-measure "vessel") |
 
 Load in Python:
 
 ```python
 import tifffile
 m = tifffile.imread("segmentations/masks/Fig1_M131_C_SYFP2_s3_masks.tif")  # (4, H, W)
-tissue, cd31_vessel, virus_vessel, cd31_top20 = (m > 0)   # booleans
+tissue, cd31_vessel, virus_vessel, cd31_top{VIS_Q} = (m > 0)   # booleans
 ```
 
 Or drag a `_masks.tif` into ImageJ/Fiji (4-slice stack) or napari (4 channels).
 
-Two rendered views of the same masks over the section images:
-- `section_overlays/<section>_overlay.jpg` — each channel with its vessel contour
-  (CD31 vessel cyan + top-20% amber; virus vessel green).
-- `contours/<section>.jpg` — a 2x2 method-QC grid (rows CD31/virus, cols Jerman
-  vs top-q%).
+Two rendered views of the Jerman vessel masks over the section images (the
+top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
+- `section_overlays/<section>_overlay.jpg` — each channel with its Jerman vessel
+  contour: CD31 (the ground truth) in magenta, virus in green.
+- `contours/<section>.jpg` — the same two Jerman contours at full resolution
+  (CD31 magenta, virus green), side by side.
 
 ## Methods and every parameter
 
@@ -251,9 +255,8 @@ figures/       fig_enrichment_by_region, fig_coverage_by_region,
                fig_enrichment_vs_q, fig_method_agreement (each PNG + PDF),
                enrichment_curves.png
 segmentations/ masks/ (39 x 4-channel TIF), section_overlays/ (39 x JPG:
-               section + vessel contours), contours/ (39 x JPG: 2x2 method QC)
-visualization/ section_panels/, zoom_crops/ (800 um), virus_vasculature/,
-               contact_sheets/ (three overview PNGs)
+               each channel + its Jerman contour, CD31 magenta / virus green),
+               contours/ (39 x JPG: full-res Jerman contours, both channels)
 ```
 
 This package is outputs only — no code. The analysis notebooks and scripts live
@@ -368,14 +371,6 @@ def main():
 
     print("segmentations/contours ...")
     copy_tree(RESULTS / "segmentation_contours", OUT / "segmentations" / "contours")
-
-    print("visualization ...")
-    copy_tree(RESULTS / "section_panels", OUT / "visualization" / "section_panels")
-    copy_tree(RESULTS / "zoom_panels", OUT / "visualization" / "zoom_crops")
-    copy_tree(RESULTS / "virus_vasculature", OUT / "visualization" / "virus_vasculature")
-    for sheet in ("section_contact_sheet_full.png", "zoom_contact_sheet_full.png",
-                  "virus_vasculature_contact_full.png"):
-        copy_one(RESULTS / sheet, OUT / "visualization" / "contact_sheets")
 
     print("README + data dictionary ...")
     write_readme(OUT / "README.md", n_masks, skipped)
