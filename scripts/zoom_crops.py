@@ -44,7 +44,7 @@ from analyse_spinal_cord import (NAME, REGION_NAME, UM_PER_PX, curated_paths,   
                                  tissue_mask)
 from visualize_sections import VIS_Q, top_q_mask                                # noqa: E402
 
-CROP_UM = 800.0    # zoomed out from 500 for more surrounding context
+CROP_UM = 500.0    # smaller than the section, so the 4 panels barely overlap
 CROP_PX = int(round(CROP_UM / UM_PER_PX))
 SCALEBAR_UM = 100.0
 # (key, display name, box colour) in the order rows are drawn.
