@@ -107,11 +107,23 @@ def saliency_centers(green, cd31, tissue, vessels):
         "coloc": np.where(stable, virus_in_vessel / (virus_in_paren + eps), -np.inf),
         "bright": np.where(valid, virus_in_tissue, -np.inf),
     }
+    # Pick greedily, blanking a crop-width box around each chosen centre so panels
+    # spread out instead of stacking on the same spot. If suppression leaves no
+    # window (crops are ~half the section, so 4 rarely fit disjointly), fall back to
+    # the real peak — an overlapping crop beats a blank panel.
+    # ponytail: only partial de-overlap; fully disjoint would need smaller/fewer crops.
     centres = {}
     for key, score in scores.items():
-        flat = int(np.argmax(score))
-        row, col = np.unravel_index(flat, score.shape)
+        suppressed = score.copy()
+        for pr, pc in filter(None, centres.values()):
+            suppressed[max(0, pr - half):pr + half, max(0, pc - half):pc + half] = -np.inf
+        row, col = np.unravel_index(int(np.argmax(suppressed)), suppressed.shape)
+        if not np.isfinite(suppressed[row, col]):
+            row, col = np.unravel_index(int(np.argmax(score)), score.shape)
         centres[key] = (int(row), int(col)) if np.isfinite(score[row, col]) else None
+
+    # a criterion with any valid window must yield a crop, never a blank panel
+    assert all(centres[k] is not None for k, s in scores.items() if np.isfinite(s).any())
     return centres
 
 
