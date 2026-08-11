@@ -7,13 +7,14 @@ spinal-cord vascular-specificity results WITHOUT the raw imaging data (which
 stays read-only on Z:) and without this repo's environment:
 
   metrics/         the two measure CSVs, a summary, and a column dictionary
-  figures/         the enrichment / coverage result plots (PNG + PDF)
+  figures/         enrichment / coverage / dice-agreement result plots (PNG + PDF)
   segmentations/
       masks/            per-section 4-channel mask TIFs (tissue, CD31 vessel,
                         virus vessel, CD31 top-percentile) for re-analysis
       section_overlays/ per-section JPG: each channel + its Jerman vessel
                         contour (CD31 ground truth magenta, virus green)
       contours/         per-section full-res Jerman contour JPG, both channels
+  zoom_crops/      per-section 500 um native-resolution crops of salient windows
   README.md        dataset, methods, every parameter, the finding, a file
                    guide, how to load the masks, and the caveats
 
@@ -55,7 +56,7 @@ MASK_CHANNELS = ["tissue", "cd31_vessel", "virus_vessel", f"cd31_top{VIS_Q}pct"]
 
 
 def clean_stem(path):
-    """Gallery-style stem, e.g. 'Fig1_M131_C_SYFP2_s3' — matches the JPG/PNG names."""
+    """Gallery-style stem, e.g. 'Fig1_M131_C_SYFP2_s3' - matches the JPG/PNG names."""
     figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
     reporter = "SYFP2" if "SYFP2" in reporter else ("tdT" if "tdT" in reporter else reporter)
     stem = f"{figure.replace(' ', '')}_{mouse}_{region}_{reporter}"
@@ -72,7 +73,7 @@ def git_commit():
 
 def render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, title, out_path):
     """Section with its Jerman vessel segmentation drawn on top, as a high-quality
-    JPG: each channel grayscale with its Jerman vessel contour — CD31, the ground
+    JPG: each channel grayscale with its Jerman vessel contour - CD31, the ground
     truth, in magenta; virus in green (thin, so the vessels stay visible).
     Downsampled 2x; JPG (q92) keeps each file well under 1 MB."""
     d = np.s_[::2, ::2]
@@ -145,12 +146,12 @@ def copy_tree(src, dst):
 
 def write_readme(readme_path, n_masks, skipped):
     commit = git_commit()
-    text = f"""# Spinal-cord vascular specificity — analysis handoff
+    text = f"""# Spinal-cord vascular specificity - analysis handoff
 
 Enhancer-AAV vascular targeting along the mouse spinal-cord axis: how strongly a
 virus reporter (SYFP2 or tdTomato) is enriched on the vasculature, measured
-against a CD31 endothelial ground truth. This package is the derived result set —
-metrics, figures, and segmentations — assembled for downstream analysis and
+against a CD31 endothelial ground truth. This package is the derived result set -
+metrics, figures, and segmentations - assembled for downstream analysis and
 visualisation.
 
 - **Exported:** {date.today().isoformat()}  ·  **repo commit:** `{commit}`
@@ -164,32 +165,32 @@ visualisation.
 
 **Virus vascular enrichment is lowest in lumbar.** For SYFP2 (n=3 mice) the full
 ordering **cervical > thoracic > lumbar is stable across the entire percentile
-sweep** (q = 2/5/10/20/30) — the strongest form of the result, not an artefact of
+sweep** (q = 2/5/10/20/30) - the strongest form of the result, not an artefact of
 one threshold. tdT is n=1 per figure (M63, M87) and shows no stable regional
-ordering — more tdT animals is the main gap. See `figures/fig_enrichment_by_region`.
+ordering - more tdT animals is the main gap. See `figures/fig_enrichment_by_region`.
 
 ## Two measures (read them together)
 
-1. **Threshold-free CD31-percentile enrichment — PRIMARY.**
+1. **Threshold-free CD31-percentile enrichment - PRIMARY.**
    `metrics/enrichment_by_cd31_percentile.csv`. "Vessel" = the top-q% of CD31
    intensity inside tissue; enrichment(q) = mean virus there / mean virus in the
-   rest of the tissue. No segmentation of the virus, no operating point — swept
+   rest of the tissue. No segmentation of the virus, no operating point - swept
    over q = 2/5/10/20/30. `coverage` = fraction of the top-q% CD31 that is
    virus-positive (parenchyma median + 3·MAD). Headline q = {VIS_Q}%.
 
-2. **Per-channel vessel-mask agreement — SECONDARY.**
+2. **Per-channel vessel-mask agreement - SECONDARY.**
    `metrics/dice_between_channels.csv`. Segment vessels in BOTH channels with a
-   graded Jerman filter and compare. Dice/Jaccard are symmetric overlap;
-   `specificity` = |virus∩CD31|/|virus| (how much of the virus mask sits on a
-   vessel); `coverage` = |virus∩CD31|/|CD31| (how much vasculature the virus
-   reaches). The virus mask is deliberately uncleaned — its off-vessel signal is
-   the vector's non-specificity, not an error. `metrics/dice_summary.csv`
-   aggregates this per region under the paper-1 names (Dice, IoU, precision =
-   specificity, recall = coverage).
+   graded Jerman filter and compare (CD31 is the ground truth). Dice/Jaccard are
+   symmetric overlap; `precision` = |virus∩CD31|/|virus| (of what virus calls
+   vessel, how much is a real vessel); `recall` = |virus∩CD31|/|CD31| (how much
+   vasculature the virus reaches). The virus mask is deliberately uncleaned - its
+   off-vessel signal is the vector's non-specificity, not an error.
+   `metrics/dice_summary.csv` aggregates this per region (dice / iou / precision /
+   recall).
 
 ## Segmentations (`segmentations/`)
 
-`masks/<section>_masks.tif` — one 4-channel `uint8` TIF per section (0 / 255),
+`masks/<section>_masks.tif` - one 4-channel `uint8` TIF per section (0 / 255),
 same H×W as the source. Channel order (axis 'C'):
 
 | # | channel | definition |
@@ -211,9 +212,9 @@ Or drag a `_masks.tif` into ImageJ/Fiji (4-slice stack) or napari (4 channels).
 
 Two rendered views of the Jerman vessel masks over the section images (the
 top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
-- `section_overlays/<section>_overlay.jpg` — each channel with its Jerman vessel
+- `section_overlays/<section>_overlay.jpg` - each channel with its Jerman vessel
   contour: CD31 (the ground truth) in magenta, virus in green.
-- `contours/<section>.jpg` — the same two Jerman contours at full resolution
+- `contours/<section>.jpg` - the same two Jerman contours at full resolution
   (CD31 magenta, virus green), side by side.
 
 ## Methods and every parameter
@@ -222,7 +223,7 @@ top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
 - **Tissue mask:** the vendored entropy-guided seeded GrabCut masker
   (`vessel_utils/_vendor`, from UCI-XuLab-RegTools). Hugs the true edge, keeps
   torn fragments (≥1% of the largest), rejects background haze. It keeps the
-  bright pial edge (no rim erosion) — accepting edge staining rather than dropping
+  bright pial edge (no rim erosion) - accepting edge staining rather than dropping
   real near-edge vessels.
 - **Vesselness:** Jerman, bounded [0,1], sigmas 1.5/3.0/6.0/12.0 µm (capillary→
   venule radius), single dataset-wide tau reference (`REFERENCE = {REFERENCE}`) so
@@ -232,16 +233,16 @@ top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
   expression, so a stricter cut keeps only vessel-associated signal). Min vessel
   size {MIN_VESSEL_PX} px (~6 µm²).
 - **Aggregation:** slices are averaged within mouse×region first; figures (Fig 1
-  SYFP2, Fig 2a/2b tdT) are kept separate — pooling would confound reporter and
+  SYFP2, Fig 2a/2b tdT) are kept separate - pooling would confound reporter and
   construct with region.
 
 ## Caveats
 
-- **The virus channel cannot be cleanly segmented into vessels** — proven, not
+- **The virus channel cannot be cleanly segmented into vessels** - proven, not
   assumed. Its off-vessel signal is genuine neuronal expression that is
   structurally vessel-like. That is why the PRIMARY measure never segments the
   virus; use `dice_between_channels.csv` only as a cross-check.
-- **tdT is n=1 per figure** — no regional claim for tdT.
+- **tdT is n=1 per figure** - no regional claim for tdT.
 - **No manual / stereological ground-truth validation yet.**
 - The older mask-based measure (`spinal_cord_specificity*.csv`, not included) was
   superseded: its calibrated reference over-segmented ~45% of tissue.
@@ -252,14 +253,16 @@ top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
 metrics/       enrichment_by_cd31_percentile.csv, dice_between_channels.csv,
                dice_summary.csv (aggregated, paper-1 names), DATA_DICTIONARY.md
 figures/       fig_enrichment_by_region, fig_coverage_by_region,
-               fig_enrichment_vs_q, fig_method_agreement (each PNG + PDF),
+               fig_enrichment_vs_q, fig_method_agreement,
+               fig_agreement_by_region (dice/precision/recall) (each PNG + PDF),
                enrichment_curves.png
 segmentations/ masks/ (39 x 4-channel TIF), section_overlays/ (39 x JPG:
                each channel + its Jerman contour, CD31 magenta / virus green),
                contours/ (39 x JPG: full-res Jerman contours, both channels)
+zoom_crops/    39 x PNG: 500 um native-resolution crops of salient windows
 ```
 
-This package is outputs only — no code. The analysis notebooks and scripts live
+This package is outputs only - no code. The analysis notebooks and scripts live
 in the source repository.
 """
     if skipped:
@@ -273,12 +276,12 @@ def write_dice_summary(dice_csv, out_path):
 
     Nested aggregation: average slices within mouse x region first, then average
     across mice, so each animal counts once regardless of its slice count. Columns
-    use the paper-1 names (iou = jaccard, precision = specificity, recall =
-    coverage) so a collaborator reading paper-1 terms finds them directly.
+    use the paper-1 names (iou = jaccard; dice/precision/recall pass through
+    unchanged) so a collaborator reading paper-1 terms finds them directly.
     """
     rows = list(csv.DictReader(open(dice_csv, newline="", encoding="utf-8")))
-    src = {"dice": "dice", "iou": "jaccard", "precision": "specificity",
-           "recall": "coverage"}
+    src = {"dice": "dice", "iou": "jaccard", "precision": "precision",
+           "recall": "recall"}
     by_region = defaultdict(lambda: defaultdict(list))
     for r in rows:
         by_region[(r["figure"], r["reporter"], r["region"])][r["mouse"]].append(r)
@@ -320,11 +323,11 @@ Both CSVs carry identifier columns `figure`, `reporter`, `mouse`, `region`
 | column | meaning |
 |--------|---------|
 | `dice`, `jaccard` | symmetric overlap of the virus and CD31 vessel masks. |
-| `specificity` | \\|virus ∩ CD31\\| / \\|virus\\| — fraction of the virus vessel mask that sits on a CD31 vessel. |
-| `coverage` | \\|virus ∩ CD31\\| / \\|CD31\\| — fraction of the CD31 vasculature the virus mask reaches. |
+| `precision` | \\|virus ∩ CD31\\| / \\|virus\\| - fraction of the virus vessel mask that lands on a real (CD31) vessel. CD31 is the ground truth. |
+| `recall` | \\|virus ∩ CD31\\| / \\|CD31\\| - fraction of the CD31 vasculature the virus vessel mask reaches. |
 | `virus_af`, `cd31_af` | area fraction of each vessel mask within tissue. |
 
-Directional pair (`specificity`, `coverage`) is more interpretable than `dice`
+Directional pair (`precision`, `recall`) is more interpretable than `dice`
 alone. With few mice, read direction-consistency across animals, not p-values.
 
 ## dice_summary.csv  (paper-1 metric names)
@@ -337,8 +340,8 @@ averaged within mouse x region first, then across mice.
 |--------|---|
 | `dice` | Dice |
 | `iou` | Jaccard / IoU |
-| `precision` | `specificity` above — \\|virus ∩ CD31\\| / \\|virus\\| |
-| `recall` | `coverage` above — \\|virus ∩ CD31\\| / \\|CD31\\| |
+| `precision` | \\|virus ∩ CD31\\| / \\|virus\\| |
+| `recall` | \\|virus ∩ CD31\\| / \\|CD31\\| |
 """, encoding="utf-8")
 
 
@@ -363,7 +366,8 @@ def main():
 
     print("figures ...")
     for base in ("fig_enrichment_by_region", "fig_coverage_by_region",
-                 "fig_enrichment_vs_q", "fig_method_agreement"):
+                 "fig_enrichment_vs_q", "fig_method_agreement",
+                 "fig_agreement_by_region"):
         for ext in (".png", ".pdf"):
             copy_one(RESULTS / f"{base}{ext}", OUT / "figures")
     copy_one(RESULTS / "enrichment_cd31_percentile_full.png", OUT / "figures",
@@ -371,6 +375,9 @@ def main():
 
     print("segmentations/contours ...")
     copy_tree(RESULTS / "segmentation_contours", OUT / "segmentations" / "contours")
+
+    print("zoom_crops ...")
+    copy_tree(RESULTS / "zoom_panels", OUT / "zoom_crops")
 
     print("README + data dictionary ...")
     write_readme(OUT / "README.md", n_masks, skipped)
@@ -385,11 +392,12 @@ DICE_OUT = RESULTS / "handoff_dice"
 
 _DICE_DICT = """# Data dictionary
 
-`dice_between_channels.csv` - one row per section. `dice`, `jaccard`; `specificity`
-= precision (|virus ∩ CD31| / |virus|); `coverage` = recall (|virus ∩ CD31| /
-|CD31|); `virus_af`, `cd31_af` area fractions. `dice_summary.csv` aggregates it per
-figure/reporter x region with the paper-1 names `dice, iou, precision, recall`
-(iou=jaccard) plus `n_mice`, `n_slices`.
+`dice_between_channels.csv` - one row per section. CD31 is the ground truth.
+`dice`, `jaccard`; `precision` = |virus ∩ CD31| / |virus| (of what virus calls
+vessel, how much is a real vessel); `recall` = |virus ∩ CD31| / |CD31| (how much
+of the vasculature virus reaches); `virus_af`, `cd31_af` area fractions.
+`dice_summary.csv` aggregates it per figure/reporter x region with the paper-1
+names `dice, iou, precision, recall` (iou=jaccard) plus `n_mice`, `n_slices`.
 """
 
 
@@ -405,8 +413,8 @@ BOTH channels with a graded Jerman filter and compare. CD31 is the ground truth.
 ## metrics/
 - `dice_summary.csv` - per figure/reporter x region, paper-1 names dice / iou /
   precision / recall (+ n_mice, n_slices).
-- `dice_between_channels.csv` - per section (precision = `specificity` column,
-  recall = `coverage`). See DATA_DICTIONARY.md.
+- `dice_between_channels.csv` - per section (dice, jaccard, precision, recall,
+  area fractions). See DATA_DICTIONARY.md.
 
 ## figures/
 - `fig_agreement_by_region` - dice / precision / recall per region (PNG + PDF).

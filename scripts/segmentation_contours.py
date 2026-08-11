@@ -83,10 +83,10 @@ def main():
                                                 PANEL_INCHES * height / width))
         for (name, channel, mask, colour, tag), ax in zip(panels, axes):
             _draw(ax, _clip(channel, tissue), mask, colour,
-                  f"{name} — Jerman {tag}   (area {mask.mean():.3f})")
+                  f"{name} - Jerman {tag}   (area {mask.mean():.3f})")
 
         label = f"{figure} {mouse} {REGION_NAME[region]}" + (f" s{slice_id}" if slice_id else "")
-        fig.suptitle(f"{label}  ({reporter}) — Jerman vessel contours: "
+        fig.suptitle(f"{label}  ({reporter}) - Jerman vessel contours: "
                      "CD31 ground truth (magenta), virus (green)", fontsize=13)
         fig.tight_layout(rect=(0, 0, 1, 0.98))
 

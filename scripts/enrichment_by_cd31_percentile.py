@@ -9,7 +9,7 @@ count as "vessel". Across defensible settings that choice moved the enrichment
 magnitude and, at the margin, the thoracic-vs-lumbar ordering. This measure
 removes the choice entirely.
 
-CD31 is an endothelial stain, so its brightest pixels ARE vessels by definition —
+CD31 is an endothelial stain, so its brightest pixels ARE vessels by definition -
 no filter needed. Define "vessel" as the top q% of CD31 intensity within tissue,
 and report
 
@@ -19,12 +19,12 @@ and report
 Sweep q. An enrichment ordering between regions that holds across q is a property
 of the data, not of where a threshold was put. This is the same quantity the
 mask-based `enrichment` estimates, with the segmentation operating point replaced
-by an explicit, swept percentile — nothing hidden.
+by an explicit, swept percentile - nothing hidden.
 
 What is and is not corrected: the virus channel is used raw (enrichment is a
 ratio of virus intensities, so a per-section gain cancels). CD31 is used raw for
 ranking pixels; only the rank matters, so CD31 staining brightness does not enter.
-Grey/white matter is not separated — that confound is orthogonal and applies to
+Grey/white matter is not separated - that confound is orthogonal and applies to
 the mask-based measure too. Reads Z: read-only.
 """
 
@@ -56,7 +56,7 @@ MIN_SPECK_PX = int(round(8.0 / UM_PER_PX ** 2))
 def top_q_mask(cd31, tissue, q):
     """The top-q% of CD31 intensity within tissue, speck-cleaned.
 
-    This is THE vessel definition for the percentile method — enrichment,
+    This is THE vessel definition for the percentile method - enrichment,
     coverage and every percentile visual (visualize_sections re-exports it) go
     through it, so the number and the picture always use the same mask.
     """
@@ -272,7 +272,7 @@ def plot_curves(sections, png_path):
         ax.set_ylabel("virus enrichment (in-vessel / out)")
         ax.set_title(f"{figure}  {reporter}   (n={len(mice)} mice)")
         ax.legend(frameon=False)
-    fig.suptitle("Vascular enrichment without segmentation — lines that stay lowest "
+    fig.suptitle("Vascular enrichment without segmentation - lines that stay lowest "
                  "across q are the robust result", fontsize=11)
     fig.tight_layout()
     fig.savefig(png_path, dpi=110, bbox_inches="tight")

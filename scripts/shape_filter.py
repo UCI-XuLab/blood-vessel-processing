@@ -42,7 +42,7 @@ def reject_blobs(mask, um_per_px, max_blob_um=25.0, min_eccentricity=0.9,
         mask: boolean vessel mask.
         um_per_px: pixel size, for the physical size gate.
         max_blob_um: components with an equivalent diameter above this are always
-            kept — too big to be a neuron. Only smaller components are eligible
+            kept - too big to be a neuron. Only smaller components are eligible
             for removal.
         min_eccentricity: keep a small component if its ellipse eccentricity is at
             least this (elongated). Below it, the component is a removal candidate.
@@ -58,7 +58,7 @@ def reject_blobs(mask, um_per_px, max_blob_um=25.0, min_eccentricity=0.9,
         Cleaned boolean mask, or (cleaned, removed) if return_removed.
 
     A component is removed only when it is small AND round by eccentricity AND
-    stubby by skeleton ratio — all three — so a structure that is elongated by
+    stubby by skeleton ratio - all three - so a structure that is elongated by
     either measure survives.
     """
     mask = np.asarray(mask, dtype=bool)

@@ -12,26 +12,26 @@ channels get DIFFERENT thresholds on purpose:
     the network directly.
   - the virus channel is dominated by non-vascular neuronal expression that is
     structurally vessel-like and cannot be told from vessels by shape. A STRICTER
-    cut (VIRUS_LOW/VIRUS_HIGH) keeps only the brightest vesselness responses —
-    which are the genuinely vessel-associated virus — and discards the dimmer
-    neuronal ridge signal. On a test section this raised specificity against CD31
+    cut (VIRUS_LOW/VIRUS_HIGH) keeps only the brightest vesselness responses -
+    which are the genuinely vessel-associated virus - and discards the dimmer
+    neuronal ridge signal. On a test section this raised precision against CD31
     from ~0.5 (at CD31's own cut) to ~0.6, without inventing vessels.
 
 Segmenting each channel as well as it can be, then comparing, replaces the older
 "same filter on both channels so it cancels" symmetry. That only looked clean
 because both masks over-segmented to ~40% of the tissue and overlapped trivially,
 inflating Dice; the tuned masks are vessel-like and the agreement is real. Even so
-the virus mask cannot fully match CD31 — see enrichment_by_cd31_percentile.py for
+the virus mask cannot fully match CD31 - see enrichment_by_cd31_percentile.py for
 the measure that never segments the virus.
 
 Read the three numbers together; the directional pair is more interpretable than
 Dice alone:
 
     dice        symmetric overlap of the two masks (the headline "agreement").
-    specificity |virus & cd31| / |virus|  — fraction of the virus vessel mask on
-                a CD31 vessel. This is the specificity claim.
-    coverage    |virus & cd31| / |cd31| — fraction of the vasculature the virus
-                vessel mask reaches.
+    precision   |virus & cd31| / |virus|  - fraction of the virus vessel mask that
+                lands on a real (CD31) vessel. CD31 is the ground truth.
+    recall      |virus & cd31| / |cd31| - fraction of the CD31 vasculature the
+                virus vessel mask reaches.
 
 Aggregation respects the nesting: three slices are three views of one animal, so
 slices are averaged within mouse x region before anything else, and figures are
@@ -103,8 +103,8 @@ def score_section(path):
     return {
         "dice": metrics.dice(mask_virus, mask_cd31),
         "jaccard": metrics.jaccard(mask_virus, mask_cd31),
-        "specificity": metrics.precision(mask_virus, mask_cd31),   # virus on vessels
-        "coverage": metrics.recall(mask_virus, mask_cd31),         # vessels labelled
+        "precision": metrics.precision(mask_virus, mask_cd31),   # |virus & cd31| / |virus|
+        "recall": metrics.recall(mask_virus, mask_cd31),         # |virus & cd31| / |cd31|
         "virus_af": float(mask_virus.mean()),
         "cd31_af": float(mask_cd31.mean()),
     }
@@ -130,8 +130,8 @@ def main():
         rows.append({"figure": figure, "reporter": reporter, "mouse": mouse,
                      "region": region, "slice": slice_id or "", **result})
         print(f"[{index:2d}/{len(paths)}] {figure} {reporter:5s} {mouse:7s} {region:2s}  "
-              f"dice {result['dice']:.3f}  specificity {result['specificity']:.3f}  "
-              f"coverage {result['coverage']:.3f}")
+              f"dice {result['dice']:.3f}  precision {result['precision']:.3f}  "
+              f"recall {result['recall']:.3f}")
 
     if not rows:
         sys.exit("no sections scored")
@@ -159,7 +159,7 @@ def main():
         print("\n" + "=" * 76)
         print(f"{figure}  {reporter}   mice: {', '.join(mice)}")
         print("=" * 76)
-        for measure in ("dice", "specificity", "coverage"):
+        for measure in ("dice", "precision", "recall"):
             print(f"\n{measure}")
             print("  " + f"{'mouse':8s}" + "".join(f"{LONG[x]:>12s}" for x in regions))
             table = {}
@@ -178,7 +178,7 @@ def main():
                     f"{np.mean([table[(m, x)] for m in complete]):12.3f}" for x in regions))
 
     print("\n" + "=" * 76)
-    print("dice/jaccard are symmetric agreement; specificity and coverage are the")
+    print("dice/jaccard are symmetric agreement; precision and recall are the")
     print("directional, interpretable pair. The virus mask is uncleaned on purpose")
     print("-- its off-vessel signal is the vector's non-specificity, not an error.")
     print("With few mice, read direction-consistency across animals, not p-values.")

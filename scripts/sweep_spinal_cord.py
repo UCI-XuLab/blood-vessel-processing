@@ -5,7 +5,7 @@
 Why this exists rather than another point estimate
 --------------------------------------------------
 Tuning on this data moved the segmented vessel area fraction across 0.004, 0.085
-and 0.35 depending on choices — the normalisation, the reference, the threshold —
+and 0.35 depending on choices - the normalisation, the reference, the threshold -
 that are individually defensible and jointly under-determined. At that point
 another single number is not evidence, because the number can be moved to taste.
 
@@ -21,7 +21,7 @@ In 2D, Jerman saturates everything above `tau * reference_lambda / 2` to exactly
 1, so the reference and the threshold are coupled and neither can be tuned alone.
 How much authority each has depends on the data. On a bimodal synthetic almost
 everything saturates and the threshold is inert; on these sections the graded
-band held 21-37% of the tissue, so the threshold does most of the work — provided
+band held 21-37% of the tissue, so the threshold does most of the work - provided
 the reference is not set so low that the whole section saturates.
 
 The reference is therefore fixed at a value where the response is graded rather
