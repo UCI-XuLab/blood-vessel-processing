@@ -381,5 +381,84 @@ def main():
     print(f"      {n_masks} mask sets" + (f", {len(skipped)} skipped" if skipped else ""))
 
 
+DICE_OUT = RESULTS / "handoff_dice"
+
+_DICE_DICT = """# Data dictionary
+
+`dice_between_channels.csv` - one row per section. `dice`, `jaccard`; `specificity`
+= precision (|virus ∩ CD31| / |virus|); `coverage` = recall (|virus ∩ CD31| /
+|CD31|); `virus_af`, `cd31_af` area fractions. `dice_summary.csv` aggregates it per
+figure/reporter x region with the paper-1 names `dice, iou, precision, recall`
+(iou=jaccard) plus `n_mice`, `n_slices`.
+"""
+
+
+def _dice_readme():
+    return f"""# Vessel-mask agreement (dice / precision / recall) - handoff
+
+Virus-vs-CD31 vessel-mask agreement, the paper-1-style measure: segment vessels in
+BOTH channels with a graded Jerman filter and compare. CD31 is the ground truth.
+
+- Exported: {date.today().isoformat()}  ·  repo commit: `{git_commit()}`
+- Source images: Z: (read-only, not included).
+
+## metrics/
+- `dice_summary.csv` - per figure/reporter x region, paper-1 names dice / iou /
+  precision / recall (+ n_mice, n_slices).
+- `dice_between_channels.csv` - per section (precision = `specificity` column,
+  recall = `coverage`). See DATA_DICTIONARY.md.
+
+## figures/
+- `fig_agreement_by_region` - dice / precision / recall per region (PNG + PDF).
+
+## segmentations/
+- `section_overlays/` + `contours/` - each channel with its Jerman vessel contour,
+  CD31 (ground truth) magenta, virus green.
+- `masks/<section>_masks.tif` - 4-channel uint8; the dice masks are channel 1
+  (cd31_vessel) and channel 2 (virus_vessel). Channel 0 is tissue, channel 3 is the
+  enrichment percentile mask (ignore it for dice).
+
+## Caveat
+The virus channel cannot be cleanly segmented into vessels - much bright virus is
+non-vascular neuronal signal - so precision against CD31 is inherently low. This is
+a cross-check, not the headline; the primary threshold-free measure is in the full
+handoff. tdT is n=1 per figure.
+
+Outputs only - no code.
+"""
+
+
+def export_dice_handoff():
+    """Slim, separate handoff: only the dice/precision/recall stats + figures.
+
+    Reuses the segmentations already built in results/handoff/ (masks + Jerman
+    figures) instead of recomputing, so it is a fast copy. Run the full export and
+    plot_results first.
+    """
+    seg = OUT / "segmentations"
+    if not seg.exists():
+        sys.exit(f"run the full export first (missing {seg})")
+    if DICE_OUT.exists():
+        shutil.rmtree(DICE_OUT)
+    DICE_OUT.mkdir(parents=True)
+
+    copy_one(RESULTS / "dice_between_channels_full.csv", DICE_OUT / "metrics",
+             "dice_between_channels.csv")
+    write_dice_summary(DICE_OUT / "metrics" / "dice_between_channels.csv",
+                       DICE_OUT / "metrics" / "dice_summary.csv")
+    (DICE_OUT / "metrics" / "DATA_DICTIONARY.md").write_text(_DICE_DICT, encoding="utf-8")
+
+    for ext in (".png", ".pdf"):
+        copy_one(RESULTS / f"fig_agreement_by_region{ext}", DICE_OUT / "figures")
+
+    for name in ("masks", "section_overlays", "contours"):
+        copy_tree(seg / name, DICE_OUT / "segmentations" / name)
+
+    (DICE_OUT / "README.md").write_text(_dice_readme(), encoding="utf-8")
+    total = sum(1 for _ in DICE_OUT.rglob("*") if _.is_file())
+    size_mb = sum(f.stat().st_size for f in DICE_OUT.rglob("*") if f.is_file()) / 1e6
+    print(f"done: {total} files, {size_mb:.0f} MB in {DICE_OUT}")
+
+
 if __name__ == "__main__":
-    main()
+    export_dice_handoff() if "--dice" in sys.argv else main()
