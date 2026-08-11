@@ -2,7 +2,7 @@
 
 Why the compartment must come from CD31, not the virus channel
 --------------------------------------------------------------
-Grey matter is obvious in the virus channel — it is the bright butterfly, because
+Grey matter is obvious in the virus channel - it is the bright butterfly, because
 that is where leak transduction into neurons sits. Segmenting it that way would
 be circular: the compartment would be defined by the signal whose
 compartment-dependence is under test, and "the virus is brighter in grey matter"
@@ -17,7 +17,7 @@ and a featureless blob in lumbar, all reporting a grey fraction near 50%.
 Three causes, each fixed here:
 
   - Otsu assumes two modes. A map smoothed at 150 um is a broad unimodal
-    gradient, so Otsu cuts near the middle of the range whatever the anatomy —
+    gradient, so Otsu cuts near the middle of the range whatever the anatomy -
     which is exactly why every section came back near half grey. This module now
     fits a two-component Gaussian mixture and *checks* the components are
     actually separated, refusing to split when they are not.
@@ -129,7 +129,7 @@ def compartment_masks(cd31_normalised, tissue, um_per_px, reference_lambda=2.5,
     tissue = np.asarray(tissue, dtype=bool)
     # Euclidean rim, matching analyse_spinal_cord.tissue_mask. Iterating a
     # 4-connected structure is an L1 erosion, so a diagonal edge would only be
-    # cleared to RIM_UM / sqrt(2) ~ 64 um instead of 90 — under-delivering the
+    # cleared to RIM_UM / sqrt(2) ~ 64 um instead of 90 - under-delivering the
     # rim exactly where pial staining runs along oblique borders.
     core = tissue & (ndi.distance_transform_edt(tissue) > RIM_UM / um_per_px)
     if not core.any():

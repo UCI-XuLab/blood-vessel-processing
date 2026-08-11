@@ -119,7 +119,7 @@ def contact_sheet(thumbs, png_path):
         ax.imshow(thumb)
         ax.set_title(f"{label}\ncoverage {coverage:.2f}", fontsize=8)
     fig.suptitle(f"Virus-labelled vasculature (virus⁺ on top-{VIS_Q}% CD31 vessels) "
-                 "— every section", fontsize=12)
+                 "- every section", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(png_path, dpi=120, bbox_inches="tight")
     plt.close(fig)

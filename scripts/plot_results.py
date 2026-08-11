@@ -12,9 +12,9 @@ vector PDF for figure assembly:
   fig_enrichment_vs_q        robustness: enrichment against the vessel-percentile
                              q. A region ordering that holds across q is a property
                              of the data, not of where a threshold was put.
-  fig_method_agreement       enrichment per region from two independent measures —
+  fig_method_agreement       enrichment per region from two independent measures -
                              threshold-free CD31-percentile and the Jerman-mask
-                             pipeline — normalised to cervical so the shapes are
+                             pipeline - normalised to cervical so the shapes are
                              comparable. Both place lumbar lowest; they disagree on
                              cervical vs thoracic, which is the known ambiguous part.
 
@@ -87,7 +87,7 @@ def _by_region_figure(rows, value_of, ylabel, suptitle, stem, hline=1.0):
 
     Slices are already collapsed inside mouse_region, so each faint line is one
     animal and the diamonds are the across-mouse mean. Shared by the enrichment
-    and coverage figures — the same aggregation, a different column.
+    and coverage figures - the same aggregation, a different column.
     """
     fig, axes = plt.subplots(1, len(REPORTERS), figsize=(6.4 * len(REPORTERS), 5.4),
                              squeeze=False)
@@ -123,7 +123,7 @@ def fig_enrichment_by_region(rows):
     _by_region_figure(
         rows, lambda r: float(r[f"enrich_top{HEADLINE_Q}"]),
         f"virus enrichment (top-{HEADLINE_Q}% CD31)",
-        "Virus vascular enrichment by spinal-cord region — lumbar is lowest in every mouse",
+        "Virus vascular enrichment by spinal-cord region - lumbar is lowest in every mouse",
         "fig_enrichment_by_region")
 
 
@@ -135,7 +135,7 @@ def fig_coverage_by_region(rows):
     _by_region_figure(
         rows, lambda r: float(r[f"cover_top{HEADLINE_Q}"]),
         f"virus coverage (fraction of top-{HEADLINE_Q}% CD31 vessels)",
-        "Virus coverage of the vasculature by region — SYFP2 lumbar reaches the fewest vessels",
+        "Virus coverage of the vasculature by region - SYFP2 lumbar reaches the fewest vessels",
         "fig_coverage_by_region", hline=None)
 
 
@@ -202,7 +202,7 @@ def fig_method_agreement(pct_rows, mask_rows):
         ax.set_ylabel("enrichment, relative to cervical")
         ax.set_title(reporter)
         ax.legend(frameon=False)
-    fig.suptitle("Both measures place lumbar lowest; the cervical–thoracic "
+    fig.suptitle("Both measures place lumbar lowest; the cervical-thoracic "
                  "order differs by method", fontsize=13)
     _save(fig, "fig_method_agreement")
 
@@ -213,8 +213,8 @@ def fig_agreement_by_region(dice_rows):
         print("   (skipping agreement figure: dice CSV not found)")
         return
     metrics = [("dice", "dice", "#2b2b2b", "-o"),
-               ("precision", "specificity", "#d1495b", "-s"),
-               ("recall", "coverage", "#00798c", "-^")]
+               ("precision", "precision", "#d1495b", "-s"),
+               ("recall", "recall", "#00798c", "-^")]
     fig, axes = plt.subplots(1, len(REPORTERS), figsize=(6.4 * len(REPORTERS), 5.2),
                              squeeze=False)
     for ax, reporter in zip(axes[0], REPORTERS):
@@ -237,7 +237,7 @@ def fig_agreement_by_region(dice_rows):
         ax.set_ylabel("virus vs CD31 vessel-mask agreement")
         ax.set_title(f"{reporter}   (n={len(mice)} mice)")
         ax.legend(frameon=False)
-    fig.suptitle("Virus–CD31 vessel-mask agreement by region (Jerman masks): "
+    fig.suptitle("Virus-CD31 vessel-mask agreement by region (Jerman masks): "
                  "dice / precision / recall", fontsize=13)
     _save(fig, "fig_agreement_by_region")
 

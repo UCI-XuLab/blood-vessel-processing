@@ -108,7 +108,7 @@ def _selfcheck():
 if __name__ == "__main__":
     _selfcheck()
     if not CSV.exists():
-        sys.exit(f"missing {CSV} — run enrichment_by_cd31_percentile.py --full first")
+        sys.exit(f"missing {CSV} - run enrichment_by_cd31_percentile.py --full first")
     text = report(list(csv.DictReader(open(CSV, newline="", encoding="utf-8"))))
     print(text)
     dst = CSV.parent / "regional_stats.txt"

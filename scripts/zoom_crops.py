@@ -10,16 +10,16 @@ so the virus-on-vessel relationship can be inspected by eye. Vessels are the
 top-q% of CD31, matching the primary threshold-free measure.
 
 The four criteria (each becomes one crop):
-  densest vasculature       most CD31 vessel area — best place to judge whether
+  densest vasculature       most CD31 vessel area - best place to judge whether
                             virus tracks vessels (on-target inspection)
-  off-vessel virus (leak)   brightest virus in parenchyma away from vessels —
+  off-vessel virus (leak)   brightest virus in parenchyma away from vessels -
                             the off-target signal (transduced neurons)
-  strongest colocalization  highest local virus-in-vessel / virus-out ratio —
+  strongest colocalization  highest local virus-in-vessel / virus-out ratio -
                             the vector at its best
   brightest virus           highest raw virus, agnostic to vessels
 
 Each section produces one figure: a locator (the section with the four crop
-boxes drawn) beside four crop strips — virus | CD31 | green/magenta merge with
+boxes drawn) beside four crop strips - virus | CD31 | green/magenta merge with
 the vessel outline and a 100 um scale bar. A zoom contact sheet tiles the
 densest-vasculature crop of every section.
 
@@ -110,7 +110,7 @@ def saliency_centers(green, cd31, tissue, vessels):
     # Pick greedily, blanking a crop-width box around each chosen centre so panels
     # spread out instead of stacking on the same spot. If suppression leaves no
     # window (crops are ~half the section, so 4 rarely fit disjointly), fall back to
-    # the real peak — an overlapping crop beats a blank panel.
+    # the real peak - an overlapping crop beats a blank panel.
     # ponytail: only partial de-overlap; fully disjoint would need smaller/fewer crops.
     centres = {}
     for key, score in scores.items():
@@ -153,7 +153,7 @@ def section_figure(green, cd31, tissue, vessels, centres, title, png_path):
     ax_loc = fig.add_subplot(gs[:, 0])
     ax_loc.imshow(_merge_rgb(_clip(green, lo_v, hi_v)[::ds, ::ds],
                              _clip(cd31, lo_c, hi_c)[::ds, ::ds]))
-    ax_loc.set_title("locator — virus (green) / CD31 (magenta)", fontsize=10)
+    ax_loc.set_title("locator - virus (green) / CD31 (magenta)", fontsize=10)
     ax_loc.set_xticks([]); ax_loc.set_yticks([])
 
     half = CROP_PX // 2
@@ -200,7 +200,7 @@ def section_figure(green, cd31, tissue, vessels, centres, title, png_path):
             for spine in ax.spines.values():
                 spine.set_edgecolor(colour); spine.set_linewidth(2)
 
-    fig.suptitle(f"{title}   —   {CROP_UM:.0f} µm crops at native resolution",
+    fig.suptitle(f"{title}   -   {CROP_UM:.0f} µm crops at native resolution",
                  fontsize=13, y=0.995)
     fig.savefig(png_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
@@ -225,7 +225,7 @@ def contact_sheet(thumbs, png_path):
         ax.imshow(thumb)
         ax.set_title(label, fontsize=8)
     fig.suptitle(f"Densest-vasculature crop of every section "
-                 f"({CROP_UM:.0f} µm) — virus (green) / CD31 (magenta)", fontsize=12)
+                 f"({CROP_UM:.0f} µm) - virus (green) / CD31 (magenta)", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(png_path, dpi=130, bbox_inches="tight")
     plt.close(fig)

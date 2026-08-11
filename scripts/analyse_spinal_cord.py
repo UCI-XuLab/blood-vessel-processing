@@ -10,7 +10,7 @@ Naming: Fig N_Mouse_Region_reporter_CD31-mag_sliceK.tif, region in {C, T, L, TL}
 
 Design note, and the main methodological choice here
 ----------------------------------------------------
-The obvious approach — segment vessels in both channels and compare the masks —
+The obvious approach - segment vessels in both channels and compare the masks -
 is wrong for this question. Running a vesselness filter on the virus channel
 pre-filters it to tubular shapes, which silently discards the off-target signal
 (transduced neurons in grey matter) that should count *against* specificity. It
@@ -23,9 +23,9 @@ and outside that mask without any shape assumption:
     enrichment  mean virus intensity in vessels / in non-vessel tissue.
                 Threshold-free, so it does not depend on a tuning choice. This is
                 the primary measure.
-    coverage    fraction of CD31 vessel area that is virus-positive — how much of
+    coverage    fraction of CD31 vessel area that is virus-positive - how much of
                 the vasculature the vector reaches.
-    off_target  fraction of virus-positive area lying outside vessels — leak into
+    off_target  fraction of virus-positive area lying outside vessels - leak into
                 parenchyma. Coverage and off_target move independently, and a
                 vector can be good at one and bad at the other.
 
@@ -65,7 +65,7 @@ SIGMAS = [1.5, 3.0, 6.0, 12.0]   # um, capillary through venule radius
 # Hysteresis with a WIDE gap. The seed (high) sits on confident vessel; the grow
 # (low) sits just above the noise floor. Measured across six SYFP2 sections by
 # scripts/dim_recall_check.py: the old narrow gap (low = high*0.5) recovered a
-# mean 0.19 of dim vessels, the wide gap 0.74 — because the wide gap follows dim
+# mean 0.19 of dim vessels, the wide gap 0.74 - because the wide gap follows dim
 # vessel segments connected to bright ones. (Recall here is against a
 # local-threshold visible-vessel proxy, not manual ground truth; read it as the
 # difference between the two settings, not absolute accuracy.) The two thresholds
@@ -93,7 +93,7 @@ def tissue_mask(green, cd31):
     Tissue is whatever is bright in either channel, so the masker runs on the
     channel sum. Its seed uses a local-entropy channel, so it rejects the flat
     background haze a pure-intensity threshold leaks into, and it keeps every
-    component >= 1% of the largest — so a section torn during histology stays whole
+    component >= 1% of the largest - so a section torn during histology stays whole
     rather than losing every piece but the biggest. It draws the true tissue edge
     INCLUDING the bright pial rim: the earlier 90 um rim erosion is gone by choice,
     since it also dropped real near-edge vessels, so the edge staining is accepted
@@ -103,7 +103,7 @@ def tissue_mask(green, cd31):
 
     GrabCut is deterministic, so masks are cached on disk, content-addressed on the
     channel sum. Delete results/tissue_masks/ (or bump _MASK_CACHE_VERSION) to
-    recompute — e.g. after re-syncing the vendored masker.
+    recompute - e.g. after re-syncing the vendored masker.
     """
     total = np.ascontiguousarray(
         np.asarray(green, np.float32) + np.asarray(cd31, np.float32))
@@ -127,7 +127,7 @@ def calibrate_reference(paths, n_sections=6):
 
     This is the point of reference_lambda. Computed per image, the vesselness
     response would be regularised against that image's own maximum eigenvalue,
-    so a fixed threshold would mean a different thing in every section — and the
+    so a fixed threshold would mean a different thing in every section - and the
     comparison being made here is precisely across sections, regions and mice.
     A brighter cervical section would then get a systematically different vessel
     criterion from a dimmer thoracic one, and the regional difference under test
@@ -166,7 +166,7 @@ def normalise_for_segmentation(channel, tissue):
     """Put each section's CD31 on a common intensity scale before filtering.
 
     Necessary, and the pilot showed why. With raw input the vessel area fraction
-    ranged 0.0036 to 0.207 across ten sections — a 57x spread, when CNS vascular
+    ranged 0.0036 to 0.207 across ten sections - a 57x spread, when CNS vascular
     density varies by nothing like that. It tracked CD31 staining contrast
     (p99/p50) almost perfectly: brightly stained sections yielded more "vessels".
     Normalising each section to its own tissue percentiles collapses that spread
@@ -180,7 +180,7 @@ def normalise_for_segmentation(channel, tissue):
 
     Applied to CD31 only. The virus channel is left raw, because `enrichment` is
     a ratio of virus intensities and subtracting a per-section offset from it
-    would change that ratio — the measurement would then depend on the
+    would change that ratio - the measurement would then depend on the
     correction.
     """
     low, high = np.percentile(channel[tissue], [50, 99])
@@ -188,7 +188,7 @@ def normalise_for_segmentation(channel, tissue):
 
 
 def vessel_mask(cd31, tissue, reference):
-    """Vessels from CD31 alone — the ground-truth channel."""
+    """Vessels from CD31 alone - the ground-truth channel."""
     response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
                                  SIGMAS, (UM_PER_PX, UM_PER_PX),
                                  reference_lambda=reference)

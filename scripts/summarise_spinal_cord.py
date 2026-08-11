@@ -11,7 +11,7 @@ overstates significance by roughly the square root of the slice count.
 
 So slices are averaged within each mouse x region first, and every comparison is
 made on the mouse-level means. Each mouse contributes all three regions, which
-makes the comparison naturally paired — and pairing is what removes the
+makes the comparison naturally paired - and pairing is what removes the
 between-animal variability that the experimenter has already flagged as large.
 
 With three mice a p-value is not worth much: the smallest achievable two-sided
@@ -64,7 +64,7 @@ def load(path):
 
 
 def mouse_region_means(rows):
-    """Average slices within each mouse x region — the unit of replication."""
+    """Average slices within each mouse x region - the unit of replication."""
     grouped = defaultdict(list)
     for row in rows:
         grouped[(row["reporter"], row["mouse"], row["region"])].append(row)

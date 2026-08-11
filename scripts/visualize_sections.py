@@ -7,7 +7,7 @@ Writes one 6-panel PNG per section to results/section_panels/, plus a contact
 sheet tiling one result panel per section. The panels show the primary,
 threshold-free measure (scripts/enrichment_by_cd31_percentile.py): a "vessel" is
 the top-q% of CD31 intensity within tissue, and enrichment is mean virus there
-over mean virus in the rest. No vesselness filter, no operating point — the only
+over mean virus in the rest. No vesselness filter, no operating point - the only
 choice is q, which is swept, so the panels visualise exactly the merged result.
 
 Panels, left to right, top then bottom:
@@ -15,7 +15,7 @@ Panels, left to right, top then bottom:
   CD31 (raw)         the endothelial ground-truth channel, same clipping
   tissue mask        section outline after the 90 um edge rim is removed
   CD31 intensity     the ranking that defines "vessel"; no threshold yet
-  top-q% vessels     the q-th percentile cut — what counts as vessel at this q
+  top-q% vessels     the q-th percentile cut - what counts as vessel at this q
   result             virus on the vessels, coloured by its own intensity, so a
                      vessel bed that the virus reaches glows and one it misses
                      stays dark; enrichment at every swept q in the title
@@ -58,7 +58,7 @@ def _result_rgb(green, tissue, vessels):
     """Dim grey virus everywhere; vessel pixels tinted green by virus intensity.
 
     A vessel bed the virus reaches glows green; one it misses stays dark. This is
-    the enrichment ratio made visible — no separate virus threshold is imposed,
+    the enrichment ratio made visible - no separate virus threshold is imposed,
     matching the threshold-free measure.
     """
     vg = _clip(green, tissue)
@@ -89,7 +89,7 @@ def panel(green, cd31, tissue, curve, title, png_path):
     ax[2].imshow(dim_cd31, cmap="gray")
     if tis.any():
         ax[2].contour(tis, levels=[0.5], colors="#ffd400", linewidths=0.6)
-    ax[2].set_title("tissue mask — 90 µm rim removed")
+    ax[2].set_title("tissue mask - 90 µm rim removed")
 
     cd31_rank = np.where(tissue, _clip(cd31, tissue), np.nan)[d]
     ax[3].set_facecolor("black")
@@ -140,7 +140,7 @@ def contact_sheet(thumbs, png_path):
         ax.imshow(thumb)
         title = f"{label}\nenrich {enrich:.2f}" if not np.isnan(enrich) else f"{label}\nenrich n/a"
         ax.set_title(title, fontsize=8)
-    fig.suptitle(f"All sections — virus on top-{VIS_Q}% CD31 vessels "
+    fig.suptitle(f"All sections - virus on top-{VIS_Q}% CD31 vessels "
                  "(green = virus-rich)", fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     fig.savefig(png_path, dpi=120, bbox_inches="tight")

@@ -3,8 +3,8 @@
 This is NOT the reference RORPO. The reference is a C++ library
 (https://github.com/path-openings/RORPO) that needs a compiler this sandbox does
 not have; scripts/build_rorpo.md sets it up on a machine that does. This module
-is a faithful-in-spirit, pure-numpy stand-in so the *comparison* — a
-length-based, contrast-preserving operator against a contrast-based Hessian one —
+is a faithful-in-spirit, pure-numpy stand-in so the *comparison* - a
+length-based, contrast-preserving operator against a contrast-based Hessian one -
 can be run now. Where a number matters, run the reference and compare.
 
 Why a path operator answers the dim-vessel problem
@@ -12,7 +12,7 @@ Why a path operator answers the dim-vessel problem
 A Hessian filter scores a vessel by its second derivative, which scales with
 contrast, so a dim vessel scores low however vessel-shaped it is. A morphological
 opening by a long line structuring element instead keeps a structure if it
-*contains a long line* in some orientation, and — being a grey opening — keeps
+*contains a long line* in some orientation, and - being a grey opening - keeps
 that structure at its own intensity. A dim but genuinely elongated vessel
 therefore survives with a dim-but-nonzero response that connectivity can then
 recover, which is exactly what a Hessian filter cannot give.
@@ -38,7 +38,7 @@ def line_footprint(length, angle_deg):
 
     Rasterising by stepping `r` along (cos, sin) and rounding collapses distinct
     steps to the same pixel near the diagonals, so a nominally length-21 line at
-    45 degrees came out ~15 pixels — meaning diagonal structures needed a third
+    45 degrees came out ~15 pixels - meaning diagonal structures needed a third
     less length to survive the opening than axis-aligned ones. Driving the
     rasterisation from the longer axis, so the span on that axis is length-1,
     gives exactly `length` pixels at every angle (a Bresenham line has
@@ -67,7 +67,7 @@ def path_opening_response(image, length, n_orientations=8, gap=1):
 
     Returns an array of shape (n_orientations, *image.shape). Each plane is the
     grey opening along one orientation: bright where a line of that length and
-    orientation fits, and — being an opening — at the original intensity there.
+    orientation fits, and - being an opening - at the original intensity there.
     """
     image = np.asarray(image, dtype=np.float32)
     if gap > 0:
@@ -101,7 +101,7 @@ def path_operator_vesselness(image, lengths, n_orientations=8, gap=1):
         # Elongation: bright where the aligned response exceeds the isotropic one.
         best = np.maximum(best, aligned - isotropic)
     # WARNING: this divides by the image's own maximum, so the [0, 1] scale means
-    # something different in every section — the very per-image dependence that
+    # something different in every section - the very per-image dependence that
     # vessel_utils removed with reference_lambda. It is here only so the response
     # is thresholdable in isolation. For a fair comparison against Jerman under a
     # fixed dataset-wide threshold, replace this with a dataset-wide reference,

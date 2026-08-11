@@ -5,7 +5,7 @@
 The analysis switched from a narrow hysteresis gap (low = high*0.5) to a wide one
 (low = 0.02, high = 0.15) on the strength of a claim about dim-vessel recall. The
 number was first asserted from a single cervical crop (45% -> 91%) with no way to
-reproduce it — the exact failure this project keeps tripping on. This script is
+reproduce it - the exact failure this project keeps tripping on. This script is
 the missing artefact, and it corrects that number: across six sections the mean
 is 0.19 -> 0.74, because the one-crop figure was not representative. The
 direction and size of the effect hold; the specific numbers did not.
@@ -15,7 +15,7 @@ What "recall" means here, precisely
 There is no manual ground truth, so this is not recall against a human tracing.
 It is recall against a *visible-vessel proxy*: CD31 pixels that clear a local
 adaptive threshold (brighter than their neighbourhood and above the tissue
-upper quartile). The proxy is imperfect — it is itself an intensity rule — so
+upper quartile). The proxy is imperfect - it is itself an intensity rule - so
 read the numbers as a self-consistent comparison between two hysteresis settings,
 not as absolute accuracy. What it can show honestly is the *difference* the wide
 gap makes, stratified by how dim the vessel is, which is the claim being made.
