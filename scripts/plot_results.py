@@ -35,6 +35,7 @@ import numpy as np
 RESULTS = Path(__file__).resolve().parent.parent / "results"
 PERCENTILE_CSV = RESULTS / "enrichment_cd31_percentile_full.csv"
 MASK_CSV = RESULTS / "spinal_cord_specificity.csv"
+DICE_CSV = RESULTS / "dice_between_channels_full.csv"
 
 QS = (2, 5, 10, 20, 30)
 HEADLINE_Q = 10   # representative percentile for the headline region plots
@@ -206,6 +207,41 @@ def fig_method_agreement(pct_rows, mask_rows):
     _save(fig, "fig_method_agreement")
 
 
+def fig_agreement_by_region(dice_rows):
+    """Dice / precision / recall between the virus and CD31 Jerman masks, per region."""
+    if not dice_rows:
+        print("   (skipping agreement figure: dice CSV not found)")
+        return
+    metrics = [("dice", "dice", "#2b2b2b", "-o"),
+               ("precision", "specificity", "#d1495b", "-s"),
+               ("recall", "coverage", "#00798c", "-^")]
+    fig, axes = plt.subplots(1, len(REPORTERS), figsize=(6.4 * len(REPORTERS), 5.2),
+                             squeeze=False)
+    for ax, reporter in zip(axes[0], REPORTERS):
+        regions = None
+        for label, col, colour, style in metrics:
+            per_mouse = mouse_region(dice_rows, reporter, lambda r, c=col: float(r[c]))
+            if regions is None:
+                present = regions_present(per_mouse)
+                regions = [r for r in present if r != "TL"] or present
+            mice = sorted(per_mouse)
+            means = [_mean([per_mouse[m].get(r, np.nan) for m in mice]) for r in regions]
+            sds = [np.nanstd([per_mouse[m].get(r, np.nan) for m in mice]) for r in regions]
+            ax.errorbar(np.arange(len(regions)), means, yerr=sds, fmt=style, color=colour,
+                        lw=2, ms=7, capsize=4, label=label)
+        if not regions:
+            ax.axis("off"); continue
+        ax.set_xticks(np.arange(len(regions)))
+        ax.set_xticklabels([LONG[r] for r in regions])
+        ax.set_ylim(0, 1)
+        ax.set_ylabel("virus vs CD31 vessel-mask agreement")
+        ax.set_title(f"{reporter}   (n={len(mice)} mice)")
+        ax.legend(frameon=False)
+    fig.suptitle("Virus–CD31 vessel-mask agreement by region (Jerman masks): "
+                 "dice / precision / recall", fontsize=13)
+    _save(fig, "fig_agreement_by_region")
+
+
 def _save(fig, stem):
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     for ext in ("png", "pdf"):
@@ -226,6 +262,7 @@ def main():
     fig_coverage_by_region(pct_rows)
     fig_enrichment_vs_q(pct_rows)
     fig_method_agreement(pct_rows, mask_rows)
+    fig_agreement_by_region(load(DICE_CSV))
 
 
 if __name__ == "__main__":
