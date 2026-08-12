@@ -11,9 +11,8 @@ stays read-only on Z:) and without this repo's environment:
   segmentations/
       masks/            per-section 4-channel mask TIFs (tissue, CD31 vessel,
                         virus vessel, CD31 top-percentile) for re-analysis
-      section_overlays/ per-section JPG: each channel + its Jerman vessel
-                        contour (CD31 ground truth magenta, virus green)
-      contours/         per-section full-res Jerman contour JPG, both channels
+      contours/         per-section full-res Jerman contour JPG: each channel with
+                        its vessel contour (CD31 ground truth magenta, virus green)
   zoom_crops/      per-section 500 um native-resolution crops of salient windows
   README.md        dataset, methods, every parameter, the finding, a file
                    guide, how to load the masks, and the caveats
@@ -45,7 +44,6 @@ from dice_between_channels import (CD31_HIGH, CD31_LOW, MIN_VESSEL_PX,        # 
                                    REFERENCE, VIRUS_HIGH, VIRUS_LOW, _segment,
                                    channels)
 from visualize_sections import VIS_Q, top_q_mask                             # noqa: E402
-import matplotlib.pyplot as plt   # after visualize_sections, which sets the Agg backend
 
 REPO = Path(__file__).resolve().parent.parent
 RESULTS = REPO / "results"
@@ -71,36 +69,11 @@ def git_commit():
         return "unknown"
 
 
-def render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, title, out_path):
-    """Section with its Jerman vessel segmentation drawn on top, as a high-quality
-    JPG: each channel grayscale with its Jerman vessel contour - CD31, the ground
-    truth, in magenta; virus in green (thin, so the vessels stay visible).
-    Downsampled 2x; JPG (q92) keeps each file well under 1 MB."""
-    d = np.s_[::2, ::2]
-
-    def grey(channel):
-        lo, hi = np.percentile(channel[tissue], [1, 99])
-        return np.clip((channel - lo) / max(hi - lo, 1e-6), 0, 1)[d]
-
-    fig, ax = plt.subplots(1, 2, figsize=(17, 8.5))
-    ax[0].imshow(grey(cd31), cmap="gray")
-    ax[0].contour(cd31_ves[d].astype(float), [0.5], colors="#ff36ff", linewidths=0.5)
-    ax[0].set_title("CD31 ground truth + Jerman vessel mask (magenta)", fontsize=11)
-    ax[1].imshow(grey(virus), cmap="gray")
-    ax[1].contour(virus_ves[d].astype(float), [0.5], colors="#39ff14", linewidths=0.5)
-    ax[1].set_title("virus + Jerman vessel mask (green)", fontsize=11)
-    for a in ax:
-        a.set_xticks([]); a.set_yticks([])
-    fig.suptitle(title, fontsize=13)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=140, bbox_inches="tight", pil_kwargs={"quality": 92})
-    plt.close(fig)
-
-
-def export_masks(mask_dir, overlay_dir):
-    """Per section: write a 4-channel mask TIF and a contour-overlay PNG."""
+def export_masks(mask_dir):
+    """Per section: write a 4-channel boolean mask TIF (tissue, cd31_vessel,
+    virus_vessel, cd31_topq). The rendered contour figures live in
+    results/segmentation_contours (copied in separately)."""
     mask_dir.mkdir(parents=True, exist_ok=True)
-    overlay_dir.mkdir(parents=True, exist_ok=True)
     paths = curated_paths()
     written, skipped = 0, []
     for index, path in enumerate(paths, 1):
@@ -118,8 +91,6 @@ def export_masks(mask_dir, overlay_dir):
         stack = np.stack([tissue, cd31_ves, virus_ves, cd31_top]).astype(np.uint8) * 255
         tifffile.imwrite(mask_dir / f"{stem}_masks.tif", stack,
                          compression="zlib", metadata={"axes": "CYX"})
-        render_overlay(virus, cd31, tissue, cd31_ves, virus_ves, stem,
-                       overlay_dir / f"{stem}_overlay.jpg")
         written += 1
         print(f"[{index:2d}/{len(paths)}] {stem}  ({stack.shape[2]}x{stack.shape[1]})")
     return written, skipped
@@ -210,12 +181,10 @@ tissue, cd31_vessel, virus_vessel, cd31_top{VIS_Q} = (m > 0)   # booleans
 
 Or drag a `_masks.tif` into ImageJ/Fiji (4-slice stack) or napari (4 channels).
 
-Two rendered views of the Jerman vessel masks over the section images (the
-top-q% percentile mask, channel 3, is kept as data but NOT drawn as a contour):
-- `section_overlays/<section>_overlay.jpg` - each channel with its Jerman vessel
-  contour: CD31 (the ground truth) in magenta, virus in green.
-- `contours/<section>.jpg` - the same two Jerman contours at full resolution
-  (CD31 magenta, virus green), side by side.
+A rendered view of the Jerman vessel masks over the section images (the top-q%
+percentile mask, channel 3, is kept as data but NOT drawn as a contour):
+- `contours/<section>.jpg` - each channel at full resolution with its Jerman
+  vessel contour: CD31 (the ground truth) in magenta, virus in green, side by side.
 
 ## Methods and every parameter
 
@@ -256,9 +225,8 @@ figures/       fig_enrichment_by_region, fig_coverage_by_region,
                fig_enrichment_vs_q, fig_method_agreement,
                fig_agreement_by_region (dice/precision/recall) (each PNG + PDF),
                enrichment_curves.png
-segmentations/ masks/ (39 x 4-channel TIF), section_overlays/ (39 x JPG:
-               each channel + its Jerman contour, CD31 magenta / virus green),
-               contours/ (39 x JPG: full-res Jerman contours, both channels)
+segmentations/ masks/ (39 x 4-channel TIF), contours/ (39 x JPG: full-res Jerman
+               contours, each channel, CD31 magenta / virus green)
 zoom_crops/    39 x PNG: 500 um native-resolution crops of salient windows
 ```
 
@@ -351,9 +319,8 @@ def main():
     OUT.mkdir(parents=True)
     print(f"assembling handoff at {OUT}\n")
 
-    print("segmentations/masks + section_overlays (recomputing) ...")
-    n_masks, skipped = export_masks(OUT / "segmentations" / "masks",
-                                    OUT / "segmentations" / "section_overlays")
+    print("segmentations/masks (recomputing) ...")
+    n_masks, skipped = export_masks(OUT / "segmentations" / "masks")
 
     print("\nmetrics ...")
     copy_one(RESULTS / "enrichment_cd31_percentile_full.csv", OUT / "metrics",
@@ -423,8 +390,8 @@ BOTH channels with a graded Jerman filter and compare. CD31 is the ground truth.
 
 ## figures/
 - `fig_agreement_by_region` - dice / precision / recall per region (PNG + PDF).
-- `segmentations/section_overlays/` + `segmentations/contours/` - each channel with
-  its Jerman vessel contour, CD31 (ground truth) magenta, virus green.
+- `segmentations/contours/` - each channel at full resolution with its Jerman
+  vessel contour, CD31 (ground truth) magenta, virus green.
 - `zoom_crops/` - per-section 500 um native-resolution crops of salient windows.
 
 ## Caveat
@@ -440,25 +407,24 @@ Outputs only - no code.
 def export_dice_handoff():
     """Self-contained handoff: the dice/precision/recall stats + all its figures.
 
-    Independent of the full handoff - it generates its own masks + overlays rather
-    than copying from results/handoff/. Run plot_results, segmentation_contours
-    --full and zoom_crops --full first; their results/ outputs are copied in.
-    Reads Z: read-only.
+    Independent of the full handoff - it generates its own masks rather than
+    copying from results/handoff/. Run plot_results, segmentation_contours --full
+    and zoom_crops --full first; their results/ outputs are copied in. Reads Z:
+    read-only.
 
     Layout: metrics/ (CSVs), masks/ (mask TIFs), figures/ (the stats plot, the
-    segmentation figures under figures/segmentations/, and figures/zoom_crops/).
+    contour figures under figures/segmentations/, and figures/zoom_crops/).
     """
     if DICE_OUT.exists():
         shutil.rmtree(DICE_OUT)
     DICE_OUT.mkdir(parents=True)
     figures = DICE_OUT / "figures"
 
-    # masks (data) + section overlays (figures), recomputed here so the package
-    # does not depend on the full handoff existing.
-    n_masks, skipped = export_masks(DICE_OUT / "masks",
-                                    figures / "segmentations" / "section_overlays")
-    # the remaining segmentation + zoom figures, from the standalone results/
-    # galleries (not from the full handoff).
+    # masks (data), recomputed here so the package does not depend on the full
+    # handoff existing.
+    n_masks, skipped = export_masks(DICE_OUT / "masks")
+    # segmentation + zoom figures, from the standalone results/ galleries (not
+    # from the full handoff).
     copy_tree(RESULTS / "segmentation_contours", figures / "segmentations" / "contours")
     copy_tree(RESULTS / "zoom_panels", figures / "zoom_crops")
     for ext in (".png", ".pdf"):
