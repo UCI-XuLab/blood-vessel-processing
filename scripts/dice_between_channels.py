@@ -97,7 +97,7 @@ def channel_masks(path):
 
 
 def score_section(path):
-    _, _, _, mask_virus, mask_cd31 = channel_masks(path)
+    _, _, tissue, mask_virus, mask_cd31 = channel_masks(path)
     if mask_cd31.sum() == 0 or mask_virus.sum() == 0:
         raise ValueError("a channel produced an empty vessel mask")
     return {
@@ -105,8 +105,8 @@ def score_section(path):
         "jaccard": metrics.jaccard(mask_virus, mask_cd31),
         "precision": metrics.precision(mask_virus, mask_cd31),   # |virus & cd31| / |virus|
         "recall": metrics.recall(mask_virus, mask_cd31),         # |virus & cd31| / |cd31|
-        "virus_af": float(mask_virus.mean()),
-        "cd31_af": float(mask_cd31.mean()),
+        "virus_af": metrics.area_fraction(mask_virus, tissue),   # |virus| / |tissue|
+        "cd31_af": metrics.area_fraction(mask_cd31, tissue),     # |cd31|  / |tissue|
     }
 
 
