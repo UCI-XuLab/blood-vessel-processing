@@ -34,8 +34,15 @@ Typical use for comparing two channels::
     rows = threshold_sweep(va, vb, np.linspace(0.05, 0.6, 12), roi=brain_mask)
     print(stability(rows, "dice"))
 
-Import the submodule you need — `from vessel_utils import metrics`, or
-`from vessel_utils.threshold import segment`. Python imports the submodule on
-demand, so reaching for a metric does not pull in anything `vesselness` needs.
-This module deliberately imports nothing itself, which is what keeps that true.
+Import the submodule by name — `from vessel_utils import metrics`, or
+`from vessel_utils.threshold import segment`. Both forms make the import system
+load that one submodule and nothing else, so reaching for a metric does not pull
+in anything `vesselness` needs. This module deliberately imports nothing itself,
+which is what keeps that true; `test_package_init_stays_empty` pins it.
+
+Note that a bare `import vessel_utils` does **not** make the submodules reachable
+as attributes: `vessel_utils.metrics` after only `import vessel_utils` raises
+`AttributeError`. An earlier version of this file supported that through a lazy
+`__getattr__` over a 45-name table; the table served no caller and was removed.
+Name the submodule in the import and both forms above work.
 """

@@ -69,7 +69,13 @@ def main():
 
     prepared = {}
     for s in load_sections(paths):
-        prepared[(s.mouse, s.region, s.slice_id)] = prepare(s)
+        # load_sections guards the loading half; this guards the filtering half,
+        # so one unusable section cannot discard every section already prepared.
+        try:
+            prepared[(s.mouse, s.region, s.slice_id)] = prepare(s)
+        except ValueError as error:
+            print(f"  {s.counter} SKIP {s.mouse} {s.region} slice {s.slice_id}: {error}")
+            continue
         print(f"  {s.counter} {s.mouse} {s.region} slice {s.slice_id}")
 
     graded = np.mean([np.mean((r[2][r[1]] > 0.01) & (r[2][r[1]] < 0.99))

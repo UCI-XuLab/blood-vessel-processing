@@ -44,7 +44,7 @@ THUMB_PX = 240
 
 def virus_positive(virus, tissue, vessels):
     """Per-image virus-positive: parenchyma median + VIRUS_K*MAD (the pipeline rule)."""
-    cut, _ = virus_cut(virus, tissue & ~vessels)
+    cut, _ = virus_cut(virus[tissue & ~vessels])
     return (virus > cut) & tissue
 
 

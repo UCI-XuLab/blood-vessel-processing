@@ -94,7 +94,7 @@ Each notebook opens with a bootstrap cell that walks up from the working directo
 
 ### The spinal-cord scripts share one section loader
 
-[scripts/](scripts/) holds the follow-up spinal-cord analysis. Every script there needs the same preamble — pick the pilot or `--full` path list, parse the filename, check the file really is a two-channel composite, cast to float32, build the tissue mask, skip-with-a-reason anything that fails. That block was copied into eight scripts and drifted. It now lives once in [analyse_spinal_cord.py](scripts/analyse_spinal_cord.py):
+[scripts/](scripts/) holds the follow-up spinal-cord analysis. Every script there needs the same preamble — pick the pilot or `--full` path list, parse the filename, check the file really is a two-channel composite, cast to float32, build the tissue mask, skip-with-a-reason anything that fails. That block was copied into eight scripts and drifted. It now lives in [analyse_spinal_cord.py](scripts/analyse_spinal_cord.py), and seven scripts use it:
 
 ```python
 paths = section_paths(full, slices_per_region=3)     # pilot subset unless full
@@ -102,7 +102,9 @@ for s in load_sections(paths):                       # s.virus, s.cd31, s.tissue
     ...                                              # s.label, s.stem, s.counter
 ```
 
-Use it for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for the result CSVs. `plot_results.py` and `regional_stats.py` deliberately stay standalone — they read only CSVs, and importing the analysis module would pull `tifffile` and the vendored GrabCut in for a four-entry dict.
+`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for every result CSV.
+
+Three scripts deliberately opt out. [plot_results.py](scripts/plot_results.py), [regional_stats.py](scripts/regional_stats.py) and [summarise_spinal_cord.py](scripts/summarise_spinal_cord.py) read only CSVs — importing the analysis module would pull `tifffile` and the vendored GrabCut in for a four-entry dict, so they keep their own `LONG`. [export_handoff.py](scripts/export_handoff.py) keeps its own loop because its `clean_stem` omits the `_s0` suffix `Section.stem` always emits; converting it would rename every exported mask TIF its README references. That divergence is a real inconsistency, just not one worth a rename.
 
 ## What lives in the notebooks, not the archive
 

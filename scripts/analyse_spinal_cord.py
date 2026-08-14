@@ -42,7 +42,6 @@ Artefact handling:
     it is why off_target is reported separately rather than folded into a score
 """
 
-import csv
 import hashlib
 import re
 import sys
@@ -57,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vessel_utils import metrics                                   # noqa: E402
 from vessel_utils._vendor import compute_entropy_grabcut, EntropyGrabCutConfig  # noqa: E402
+from vessel_utils.sweep import write_csv                           # noqa: E402
 from vessel_utils.threshold import segment                         # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue  # noqa: E402
 
@@ -219,7 +219,7 @@ def analyse(path, reference):
     enrichment = float(in_vessel.mean() / outside.mean())
 
     # Virus-positive, calibrated against this image's own parenchyma.
-    cut, background = virus_cut(green, parenchyma)
+    cut, background = virus_cut(outside)
     virus_positive = (green > cut) & tissue
 
     coverage = float((virus_positive & vessels).sum() / vessels.sum())
@@ -297,7 +297,11 @@ def curated_paths(pilot_mice=None, slices_per_region=None):
 # full path list, parse the filename, check the file really is a two-channel
 # composite, cast to float32, build the tissue mask, and skip-with-a-reason
 # anything that fails. That block was copied into eight scripts and drifted; it
-# lives here once now, and a script's loop is `for s in load_sections(paths)`.
+# lives here now and a script's loop is `for s in load_sections(paths)`.
+#
+# Seven scripts use it. export_handoff.py deliberately does not: its `clean_stem`
+# omits the `_s0` suffix that `Section.stem` always emits, so switching it would
+# rename every exported mask TIF that its README references.
 # --------------------------------------------------------------------------
 
 def short_reporter(reporter):
@@ -305,7 +309,11 @@ def short_reporter(reporter):
     return "SYFP2" if "SYFP2" in reporter else "tdT" if "tdT" in reporter else reporter
 
 
-@dataclass(frozen=True)
+# eq=False, so the generated __eq__/__hash__ over the array fields are not
+# built: hashing one would raise on the ndarrays, and comparing two would raise
+# "truth value of an array is ambiguous". Identity semantics are what a loaded
+# section wants anyway, and they let a Section be used as a dict key.
+@dataclass(frozen=True, eq=False)
 class Section:
     """One loaded, tissue-masked section, with its identifiers already parsed."""
     path: Path
@@ -315,7 +323,6 @@ class Section:
     mouse: str
     region: str
     reporter: str        # display form, from short_reporter
-    reporter_raw: str    # exactly as it appears in the filename
     slice_id: str        # "" when the filename carries no slice number
     virus: np.ndarray
     cd31: np.ndarray
@@ -340,7 +347,13 @@ class Section:
 
 
 def section_paths(full=False, slices_per_region=1, pilot_mice=2):
-    """Everything curated with --full, else a pilot subset of it."""
+    """Every curated section when `full`, else a pilot subset of them.
+
+    **`full=True` ignores `slices_per_region` and `pilot_mice`** - --full means
+    every section, and the subset arguments describe only the pilot. Callers
+    pass both because `full` is a runtime flag, so read the signature as "the
+    pilot is this shape" rather than as a filter applied in both modes.
+    """
     return (curated_paths() if full
             else curated_paths(pilot_mice=pilot_mice,
                                slices_per_region=slices_per_region))
@@ -369,20 +382,24 @@ def load_sections(paths):
         yield Section(path=path, index=index, total=total, figure=figure,
                       mouse=mouse, region=region,
                       reporter=short_reporter(reporter_raw),
-                      reporter_raw=reporter_raw, slice_id=slice_id or "",
+                      slice_id=slice_id or "",
                       virus=virus, cd31=cd31, tissue=tissue)
 
 
-def virus_cut(virus, parenchyma, k=VIRUS_K):
+def virus_cut(parenchyma_values, k=VIRUS_K):
     """Virus-positive threshold, calibrated on this image's own parenchyma.
 
     Per-image by design: the dataset README notes brightness was adjusted per
     image, so a fixed absolute cut would confound acquisition settings with
     biology. Returns (cut, background) - the background median is reported
     alongside the cut so a section's calibration is visible in the CSV.
+
+    Takes the already-extracted 1-D sample, not the image and a mask: a caller
+    that needs the parenchyma values for anything else (`analyse` needs their
+    mean) would otherwise fancy-index a multi-megapixel array three times over.
     """
-    background = float(np.median(virus[parenchyma]))
-    mad = float(1.4826 * np.median(np.abs(virus[parenchyma] - background)))
+    background = float(np.median(parenchyma_values))
+    mad = float(1.4826 * np.median(np.abs(parenchyma_values - background)))
     return background + k * mad, background
 
 
@@ -416,14 +433,12 @@ def main():
               f"enrich {result['enrichment']:5.2f}  cover {result['coverage']:5.3f}  "
               f"offtgt {result['off_target']:5.3f}  vessel_af {result['vessel_area_fraction']:.4f}")
 
+    if not rows:
+        sys.exit("no sections scored")
     out = Path(__file__).resolve().parent.parent / "results"
     out.mkdir(exist_ok=True)
-    csv_path = out / (f"spinal_cord_specificity_pilot{slices}.csv" if pilot
-                      else "spinal_cord_specificity.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    csv_path = write_csv(rows, out / (f"spinal_cord_specificity_pilot{slices}.csv"
+                                      if pilot else "spinal_cord_specificity.csv"))
     print(f"\nwrote {csv_path}")
 
     print("\n=== by region (mean +/- sd across sections) ===")

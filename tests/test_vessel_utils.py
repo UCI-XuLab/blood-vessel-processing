@@ -411,13 +411,31 @@ def test_write_csv_round_trips(tmp_path):
 # package surface
 # --------------------------------------------------------------------------
 
-def test_metrics_do_not_require_the_vesselness_dependencies():
-    """Reaching for a metric must not import the filter stack.
+def test_package_init_stays_empty():
+    """`vessel_utils/__init__.py` must import nothing.
 
-    `vessel_utils/__init__.py` imports nothing, so a submodule import pulls in
-    that submodule and no other. Anything added to the package `__init__` would
-    break this.
+    This is the property the whole import scheme rests on, and it needs pinning
+    directly: asserting that some *particular* module stays out of `sys.modules`
+    does not, because a submodule that shares its dependencies could be imported
+    eagerly and the assertion would still pass. So check the package namespace
+    itself - a bare `import vessel_utils` must bring no submodule with it.
     """
+    import subprocess
+    import sys
+    code = (
+        "import sys, types, vessel_utils;"
+        "loaded = [n for n, v in vars(vessel_utils).items()"
+        "          if isinstance(v, types.ModuleType) and not n.startswith('__')];"
+        "assert not loaded, f'__init__ eagerly imported {loaded}';"
+        "assert not [m for m in sys.modules if m.startswith('vessel_utils.')],"
+        "    sorted(m for m in sys.modules if m.startswith('vessel_utils.'))"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=str(
+        __import__("pathlib").Path(__file__).resolve().parent.parent))
+
+
+def test_metrics_do_not_require_the_vesselness_dependencies():
+    """Reaching for a metric must not import the filter stack."""
     import subprocess
     import sys
     code = (

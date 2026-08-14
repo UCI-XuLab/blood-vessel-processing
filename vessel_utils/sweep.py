@@ -107,9 +107,13 @@ def stability(rows, key="dice", tolerance=0.05):
 
 
 def write_csv(rows, path):
-    """Write sweep rows to CSV, one row per threshold."""
+    """Write a list of uniform dicts to CSV, taking the header from the first.
+
+    Used for sweep rows here and for per-section result rows by the spinal-cord
+    scripts, so keep it generic - it is the one place result CSVs get written.
+    """
     if not rows:
-        raise ValueError("no sweep rows to write")
+        raise ValueError("no rows to write")
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()

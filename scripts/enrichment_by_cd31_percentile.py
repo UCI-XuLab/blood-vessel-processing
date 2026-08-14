@@ -105,7 +105,7 @@ def coverage_curve(virus, cd31, tissue):
         if not vessels.any() or not parenchyma.any():
             out[q] = float("nan")
             continue
-        cut, _ = virus_cut(virus, parenchyma)
+        cut, _ = virus_cut(virus[parenchyma])
         out[q] = float(((virus > cut) & vessels).sum() / vessels.sum())
     return out
 
