@@ -102,9 +102,17 @@ for s in load_sections(paths):                       # s.virus, s.cd31, s.tissue
     ...                                              # s.label, s.stem, s.counter
 ```
 
-`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for every result CSV.
+`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for the per-section result CSVs.
 
-Three scripts deliberately opt out. [plot_results.py](scripts/plot_results.py), [regional_stats.py](scripts/regional_stats.py) and [summarise_spinal_cord.py](scripts/summarise_spinal_cord.py) read only CSVs — importing the analysis module would pull `tifffile` and the vendored GrabCut in for a four-entry dict, so they keep their own `LONG`. [export_handoff.py](scripts/export_handoff.py) keeps its own loop because its `clean_stem` omits the `_s0` suffix `Section.stem` always emits; converting it would rename every exported mask TIF its README references. That divergence is a real inconsistency, just not one worth a rename.
+**Three loaders remain outside it, deliberately.** If you change `load_sections`, check whether the change belongs in these too — they are what produce two of the three result CSVs:
+
+| loader | why it stays |
+| --- | --- |
+| `analyse_spinal_cord.analyse()` | takes a path so its own `main()` and the notebooks can drive it per section; writes `spinal_cord_specificity.csv` |
+| `dice_between_channels.channels()` / `channel_masks()` | `notebooks/dice_between_channels.ipynb` calls `channel_masks(path)` and `score_section(path)` directly; changing the signature breaks a stored notebook |
+| `export_handoff.clean_stem()` + its loop | `clean_stem` omits the `_s0` suffix `Section.stem` always emits, so converting it renames every exported mask TIF its README references. A real inconsistency, just not one worth a rename |
+
+`plot_results.py`, `regional_stats.py` and `summarise_spinal_cord.py` read only CSVs and import none of this — pulling in the analysis module would drag `tifffile` and the vendored GrabCut along for a four-entry dict, so they keep their own `LONG`.
 
 ## What lives in the notebooks, not the archive
 

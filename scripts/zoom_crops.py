@@ -220,7 +220,7 @@ def main():
     out = Path(__file__).resolve().parent.parent / "results" / "zoom_panels"
     out.mkdir(parents=True, exist_ok=True)
 
-    tiles = []
+    tiles, written = [], 0
     for s in load_sections(paths):
         if min(s.virus.shape) < CROP_PX:
             print(f"{s.counter} SKIP {s.path.name}: smaller than one crop")
@@ -232,12 +232,15 @@ def main():
         png = out / f"{s.stem}.png"
         section_figure(s.virus, s.cd31, s.tissue, vessels, centres,
                        f"{s.label}  ({s.reporter})", png)
+        written += 1
+        # A figure is written for every section; a contact-sheet tile only for
+        # those with a valid densest window, so the two counts differ.
         if centres.get("densest") is not None:
             tiles.append((s.label,
                           _densest_thumb(s.virus, s.cd31, s.tissue, centres["densest"])))
         print(f"{s.counter} {png.name}")
 
-    print(f"\nwrote {len(tiles)} zoom figures to {out}")
+    print(f"\nwrote {written} zoom figures to {out} ({len(tiles)} on the contact sheet)")
     contact_sheet(tiles, out.parent / ("zoom_contact_sheet_full.png" if full
                                        else "zoom_contact_sheet_pilot.png"),
                   f"Densest-vasculature crop of every section "

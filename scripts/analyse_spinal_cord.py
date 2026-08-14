@@ -200,7 +200,10 @@ def vessel_mask(cd31, tissue, reference):
 
 def analyse(path, reference):
     stack = tifffile.imread(path)
-    if stack.ndim != 3 or stack.shape[0] < 2:
+    # `!= 2`, matching load_sections: `< 2` would let a 3-channel file through
+    # and guess that stack[0]/stack[1] are virus/CD31, which curated_paths
+    # refuses to do precisely because that pairing is not established.
+    if stack.ndim != 3 or stack.shape[0] != 2:
         raise ValueError(f"expected a 2-channel composite, got shape {stack.shape}")
     green = stack[0].astype(np.float32)
     cd31 = stack[1].astype(np.float32)
@@ -368,7 +371,14 @@ def load_sections(paths):
     """
     total = len(paths)
     for index, path in enumerate(paths, 1):
-        figure, mouse, region, reporter_raw, slice_id = NAME.match(path.name).groups()
+        match = NAME.match(path.name)
+        if match is None:
+            # Callers derive their list from curated_paths, which only yields
+            # matching names - but this is the shared entry point now, and its
+            # contract is to report and skip rather than raise mid-batch.
+            print(f"[{index:2d}/{total}] SKIP {path.name}: filename does not parse")
+            continue
+        figure, mouse, region, reporter_raw, slice_id = match.groups()
         stack = tifffile.imread(path)
         if stack.ndim != 3 or stack.shape[0] != 2:
             print(f"[{index:2d}/{total}] SKIP {path.name}: not 2-channel")
@@ -407,11 +417,11 @@ def main():
     pilot = "--full" not in sys.argv
     slices = 3 if "--slices3" in sys.argv else 1
     if pilot:
-        paths = curated_paths(pilot_mice=2, slices_per_region=slices)
+        paths = section_paths(slices_per_region=slices)
         print(f"PILOT: {len(paths)} images (2 mice per reporter, {slices} slice(s) "
               f"per region). --slices3 for three, --full for everything.\n")
     else:
-        paths = curated_paths()
+        paths = section_paths(full=True)
         print(f"{len(paths)} curated two-channel images (Fig 1 and Fig 2)\n")
     print("calibrating one dataset-wide reference_lambda:")
     reference = calibrate_reference(paths, n_sections=min(6, len(paths)))

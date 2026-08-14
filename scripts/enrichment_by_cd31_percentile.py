@@ -93,8 +93,9 @@ def coverage_curve(virus, cd31, tissue):
     genuine neuronal expression, structurally vessel-like), so the vessel geometry
     comes from CD31 and the virus only decides which of those vessels are labelled.
 
-    "Virus-positive" is the pipeline's per-image rule (parenchyma median +
-    VIRUS_K*MAD), so a per-section brightness gain does not move it. Reported per q
+    "Virus-positive" is the pipeline's per-image rule (`virus_cut`: parenchyma
+    median + k*MAD, k from `analyse_spinal_cord.VIRUS_K`), so a per-section
+    brightness gain does not move it. Reported per q
     because "vessel" is the top-q% of CD31; the companion off-vessel area fraction
     is dominated by the vast parenchyma and is deliberately not returned here.
     """
