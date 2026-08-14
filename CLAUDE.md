@@ -57,7 +57,7 @@ Both packages are split by pipeline stage, so an import block reads as a descrip
 | [metrics.py](vessel_utils/metrics.py) | `dice`, `jaccard`, `precision`, `recall`, `cl_dice`, `area_fraction`, `agreement`, `agreement_by_calibre` |
 | [synth.py](vessel_utils/synth.py) | `vascular_tree`, `render_tree`, `simulate_acquisition`, `phantom` |
 | [benchmark.py](vessel_utils/benchmark.py) | `score_segmentation`, `run_benchmark`, `sweep_condition`, `summarise` |
-| [_vendor/](vessel_utils/_vendor/) | `compute_entropy_grabcut`, `EntropyGrabCutConfig` — the tissue masker, vendored from UCI-XuLab-RegTools |
+| [_vendor/](vessel_utils/_vendor/) | `compute_entropy_grabcut`, `EntropyGrabCutConfig`, `EntropyGrabCutResult` — the tissue masker. **Vendored, not ours: do not edit it here**, re-sync from UCI-XuLab-RegTools per [_vendor/README.md](vessel_utils/_vendor/README.md). A local edit diverges from upstream and invalidates every cached mask under `results/tissue_masks/` |
 
 **Removed, and why it matters if you go looking for it.** `storage`, `chunked` and `correct` (chunked OME-Zarr conversion, halo-sized blockwise filtering, lightsheet destriping and depth-attenuation correction), plus `qc`, `validate`, `ensemble` and `sweep`, were built for whole-brain lightsheet volumes and validation designs that no analysis here ever ran — every one of their callers was its own test. They were deleted rather than left to read as a description of work that happened; `git log` has them if that work restarts, and the design reasoning is preserved in the sections below. That also dropped `zarr`, `dask` and `PyWavelets` from the dependencies. **Do not re-add a module here speculatively** — the last round cost ~2,000 lines and three dependencies carrying nothing.
 
@@ -73,7 +73,7 @@ Three deliberate departures, each addressing a consistency problem in the archiv
 
 ### If whole-brain lightsheet work restarts
 
-None of this is in the tree — it was removed with `storage`/`chunked`/`correct` (recover them with `git log -- vessel_utils/storage.py`). It is recorded because each point cost real debugging and none of it is obvious:
+None of this is in the tree — it was removed with `storage`/`chunked`/`correct`. To get a deleted file back, find the commit that removed it and read the parent: `git log --oneline --diff-filter=D -- vessel_utils/storage.py` then `git show <rev>^:vessel_utils/storage.py` (or `git checkout <rev>^ -- vessel_utils/` for the lot). `git log --` alone lists commits, it does not produce the source. The reasoning below is recorded because each point cost real debugging and none of it is obvious:
 
 - **A raw acquisition is ~2600 planes of ~10k x 10k, ~500 GB per channel.** Convert to a chunked store *before* anything else. One TIFF per plane is the worst layout for 3D work: a 64-voxel-deep column means opening 64 files and decoding 64 full planes. Chunked blocks plus a pyramid fixes it — and coarse levels matter, because tissue masks and depth profiles need no capillary detail.
 - **Halos must match the filter's *actual* reach, in physical units.** `scipy.ndimage.gaussian_filter` truncates at **4.0σ**, not the 3σ conventionally quoted. Sizing a halo at 3σ leaves a real seam at every chunk boundary — small in absolute terms, but concentrated exactly where it severs vessels and changes the topology every skeleton-based measure depends on. Anisotropic spacing means a different halo per axis.

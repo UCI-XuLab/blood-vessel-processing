@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vessel-utils"
-version = "1.0.0"
+# 2.0.0: vessel_utils lost seven of its twelve modules (storage, chunked,
+# correct, qc, validate, ensemble, sweep) and three dependencies. A major bump
+# so an installed 1.0.0 and this are told apart by their version rather than by
+# a ModuleNotFoundError.
+version = "2.0.0"
 description = "Blood vessel segmentation for mouse brain microscopy: the published pipeline, frozen, plus active development"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,7 +21,6 @@ dependencies = [
     "scipy",
     "SimpleITK",
     "tifffile",
-    "tqdm",          # the archive notebooks' batch loops
 ]
 
 [project.optional-dependencies]
@@ -30,6 +33,7 @@ dev = [
     "nbconvert",    # execute notebooks headlessly
     "nbclient",
     "ipykernel",
+    "tqdm",         # the archive notebooks' batch loops; no .py imports it
 ]
 
 [tool.setuptools]

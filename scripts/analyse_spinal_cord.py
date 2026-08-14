@@ -399,10 +399,15 @@ def load_sections(paths):
 def write_csv(rows, path):
     """Write a list of uniform dicts to CSV, taking the header from the first.
 
-    Lived in `vessel_utils.sweep` until that module went; it only ever served
-    the three result CSVs written here, so it sits with them rather than in the
-    library. Raising on empty beats writing a header-only file that reads as a
-    successful run with no sections.
+    Lived in `vessel_utils.sweep` until that module went. It sits here because
+    its three callers - this module, `dice_between_channels` and
+    `enrichment_by_cd31_percentile` - all import this module anyway, so it costs
+    them nothing. `export_handoff` keeps its own writer on purpose: that one
+    lists `fieldnames` explicitly because the column order of a published
+    artefact should not depend on dict insertion order.
+
+    Raising on empty beats writing a header-only file that reads as a successful
+    run over zero sections. Tested in tests/test_script_helpers.py.
     """
     if not rows:
         raise ValueError("no rows to write")

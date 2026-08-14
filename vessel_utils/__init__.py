@@ -13,17 +13,23 @@ better, not to reproduce.
 
 Typical use for comparing two channels::
 
+    from vessel_utils import metrics
     from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue
     from vessel_utils.threshold import segment
 
     spacing = (0.65, 0.65)               # um per pixel
     sigmas = [1.5, 3.0, 6.0, 12.0]       # bracket the vessel radii, in um
 
-    # Pin the tau reference once so a threshold means the same thing everywhere.
+    # Pin the tau reference once so a threshold means the same thing in both
+    # channels and in every section - that is the whole point of passing it.
     reference = max_eigenvalue(calibration_image, sigmas, spacing, percentile=99.9)
 
     va = jerman_vesselness(channel_a, sigmas, spacing, reference_lambda=reference)
+    vb = jerman_vesselness(channel_b, sigmas, spacing, reference_lambda=reference)
     mask_a = segment(va, low=0.03, high=0.09, roi=tissue)
+    mask_b = segment(vb, low=0.03, high=0.09, roi=tissue)
+
+    print(metrics.agreement(mask_a, mask_b, roi=tissue))
 
 Import the submodule by name — `from vessel_utils import metrics`, or
 `from vessel_utils.threshold import segment`. Both forms make the import system
@@ -37,12 +43,8 @@ as attributes: `vessel_utils.metrics` after only `import vessel_utils` raises
 `__getattr__` over a 45-name table; the table served no caller and was removed.
 Name the submodule in the import and both forms above work.
 
-**What is not here, and why.** `storage`, `chunked` and `correct` (chunked
-OME-Zarr conversion, halo-sized blockwise filtering, lightsheet destriping and
-depth-attenuation correction), plus `qc`, `validate`, `ensemble` and `sweep`,
-were written for whole-brain lightsheet volumes and for validation designs that
-no analysis in this repository ever ran — every caller was its own test. They
-were removed rather than left to rot into documentation of work that did not
-happen; `git log` has them if that work restarts. Removing them also dropped
-`zarr`, `dask` and `PyWavelets` from the dependency list.
+Seven modules were removed in 2026-08 because nothing outside their own tests
+called them. See CLAUDE.md, "Removed, and why it matters if you go looking for
+it", for the list, the reasoning, and how to recover a file — that is the one
+canonical copy, so this note stays a pointer rather than a second version of it.
 """
