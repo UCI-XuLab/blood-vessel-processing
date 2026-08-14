@@ -31,15 +31,10 @@ Where follow-up work happens. It is free to differ from the archive:
 | `vesselness` | Jerman vesselness — physical scales, 2D and 3D, response bounded in [0,1] |
 | `threshold` | hysteresis thresholding and mask clean-up |
 | `metrics` | Dice, Jaccard, precision, recall, clDice, area fractions, agreement by vessel calibre |
-| `sweep` | threshold sensitivity analysis |
-| `storage` | chunked OME-Zarr conversion for volumes larger than memory |
-| `correct` | lightsheet destriping and depth attenuation correction |
-| `chunked` | running filters over large volumes with correctly sized halos |
 | `synth` | synthetic vasculature with a simulated lightsheet acquisition |
-| `ensemble` | combining segmentations and mapping where they disagree |
 | `benchmark` | scoring a segmenter against phantoms with known ground truth |
-| `qc` | first-contact inspection of a new acquisition |
-| `validate` | accuracy on real data without dense annotation |
+
+`vessel_utils/_vendor/` holds the entropy-guided GrabCut tissue masker, copied from UCI-XuLab-RegTools. It is *not* part of the above — it is a vendored copy, and unlike the rest of this package it must **not** be edited locally: re-sync it from upstream instead, per [`_vendor/README.md`](vessel_utils/_vendor/README.md). Editing it in place silently diverges from RegTools and invalidates every cached tissue mask.
 
 The main differences: sigmas are in physical units rather than voxels, so anisotropic data is handled correctly; the vesselness response has an absolute scale rather than being rescaled per image, so one threshold means the same thing in both channels and across slices; and the metric set drops four measures that carry little information on binary masks in favour of `clDice`, which compares centrelines and so registers connectivity disagreements that voxel overlap misses.
 
@@ -54,9 +49,11 @@ The analysis itself is stored as Jupyter notebooks, whose contents can be run an
 ## Setup
 
 ```bash
-pip install -e .
+pip install -e ".[dev]"
 jupyter lab
 ```
+
+`[dev]` is what the notebooks need — `pip install -e .` alone covers `import vessel_utils` but not the notebook stack (`tqdm`, `pandas`, `jupyterlab`), which no module imports.
 
 The install is optional — each notebook locates the repository root and adds it to `sys.path` on its own, so the notebooks also run from a plain checkout.
 
@@ -77,4 +74,4 @@ pip install -e ".[dev]"
 pytest
 ```
 
-426 tests. The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires `velazquez_rivera_2025` to produce bit-identical results; it also hashes that package against a manifest so accidental edits to the published implementation fail loudly. The active package is checked against the properties it claims rather than against history.
+384 tests. The suite reconstructs the helper functions as they were defined inline in the notebooks before they were extracted, and requires `velazquez_rivera_2025` to produce bit-identical results; it also hashes that package against a manifest so accidental edits to the published implementation fail loudly. The active package is checked against the properties it claims rather than against history.

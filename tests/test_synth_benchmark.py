@@ -1,4 +1,4 @@
-"""Tests for the phantom generator, the ensemble, and the benchmark harness.
+"""Tests for the phantom generator and the benchmark harness.
 
 The phantom is the only place in this project with a known-correct answer, so its
 own correctness carries weight: if the generator is wrong, every accuracy number
@@ -9,7 +9,7 @@ These check the geometry and the physics separately from the segmentation.
 import numpy as np
 import pytest
 
-from vessel_utils import benchmark, ensemble, metrics, synth
+from vessel_utils import benchmark, synth
 
 
 # --------------------------------------------------------------------------
@@ -158,79 +158,6 @@ def test_phantom_returns_matching_volume_mask_and_segments():
     assert 0.001 < mask.mean() < 0.15, f"implausible vessel fraction {mask.mean()}"
     assert volume[mask].mean() > volume[~mask].mean() * 2
     assert len(segments) > 10
-
-
-# --------------------------------------------------------------------------
-# ensemble
-# --------------------------------------------------------------------------
-
-def three_masks():
-    base = np.zeros((16, 32, 32), bool)
-    base[4:12, 10:22, 10:22] = True
-    a = base.copy()
-    b = base.copy(); b[4:6] = False          # b misses a slab
-    c = base.copy(); c[:, :, 25:28] = True   # c adds a false structure
-    return a, b, c
-
-
-def test_vote_fraction_and_majority_consensus():
-    a, b, c = three_masks()
-    fraction = ensemble.vote_fraction([a, b, c])
-    assert fraction[8, 15, 15] == pytest.approx(1.0)
-    assert fraction[4, 15, 15] == pytest.approx(2 / 3)
-    assert fraction[8, 15, 26] == pytest.approx(1 / 3)
-
-    majority = ensemble.consensus([a, b, c])
-    assert majority[4, 15, 15] and not majority[8, 15, 26]
-
-
-def test_union_and_intersection_trade_recall_for_precision():
-    a, b, c = three_masks()
-    union = ensemble.consensus([a, b, c], rule="union")
-    intersection = ensemble.consensus([a, b, c], rule="intersection")
-    assert intersection.sum() < ensemble.consensus([a, b, c]).sum() < union.sum()
-
-
-def test_disagreement_peaks_where_methods_split():
-    a, b, c = three_masks()
-    uncertainty = ensemble.disagreement_map([a, b, c])
-    assert uncertainty[8, 15, 15] == pytest.approx(0.0)   # unanimous vessel
-    assert uncertainty[0, 0, 0] == pytest.approx(0.0)     # unanimous background
-    assert uncertainty[4, 15, 15] > 0.5                   # split
-
-
-def test_weights_must_be_valid():
-    a, b, c = three_masks()
-    with pytest.raises(ValueError):
-        ensemble.vote_fraction([a, b, c], weights=[1.0, 1.0])
-    with pytest.raises(ValueError):
-        ensemble.vote_fraction([a, b, c], weights=[0.0, 0.0, 0.0])
-    with pytest.raises(ValueError):
-        ensemble.consensus([a], rule="majority")
-    with pytest.raises(ValueError, match="unknown rule"):
-        ensemble.consensus([a, b], rule="nonsense")
-
-
-def test_redundancy_flags_a_non_diverse_ensemble():
-    """Consensus among near-identical members is confidence without evidence."""
-    a, b, _ = three_masks()
-    almost_a = a.copy()
-    almost_a[5, 11, 11] = False
-
-    duplicated = ensemble.redundancy([a, almost_a], names=["a", "a2"])
-    assert not duplicated["diverse"]
-    assert duplicated["near_duplicate_pairs"][0][:2] == ("a", "a2")
-
-    diverse = ensemble.redundancy([a, b], names=["a", "b"], threshold=0.99)
-    assert diverse["diverse"]
-
-
-def test_pairwise_agreement_is_symmetric_with_unit_diagonal():
-    a, b, c = three_masks()
-    matrix, names = ensemble.pairwise_agreement([a, b, c], names=["a", "b", "c"])
-    assert names == ["a", "b", "c"]
-    np.testing.assert_allclose(matrix, matrix.T)
-    np.testing.assert_allclose(np.diag(matrix), 1.0)
 
 
 # --------------------------------------------------------------------------
