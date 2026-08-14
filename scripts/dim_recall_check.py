@@ -27,15 +27,14 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import tifffile
 from skimage.filters import threshold_local
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, curated_paths,   # noqa: E402
-                                 normalise_for_segmentation, tissue_mask)
-from vessel_utils.threshold import clean_mask                              # noqa: E402
+from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, load_sections,   # noqa: E402
+                                 normalise_for_segmentation, section_paths)
+from vessel_utils.threshold import clean_mask, hysteresis_threshold        # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness                      # noqa: E402
 
 SPACING = (UM_PER_PX, UM_PER_PX)
@@ -66,32 +65,23 @@ def recall_by_brightness(mask, proxy, normalised):
 
 def main():
     # A few SYFP2 sections spanning regions; the effect is not region-specific.
-    paths = [p for p in curated_paths(pilot_mice=2, slices_per_region=1)
+    paths = [p for p in section_paths()
              if NAME.match(p.name).group(4).startswith("SYFP2")]
     print(f"{len(paths)} sections\n")
     print(f"{'section':22s}{'gap':8s}{'dim':>7}{'mid':>7}{'bright':>8}{'area':>8}")
 
     dim = {"narrow": [], "wide": []}
-    for path in paths:
-        _, mouse, region, _, _ = NAME.match(path.name).groups()
-        stack = tifffile.imread(path)
-        green, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        try:
-            tissue = tissue_mask(green, cd31)
-        except ValueError as error:
-            print(f"  SKIP {path.name}: {error}")
-            continue
-        normalised = normalise_for_segmentation(cd31, tissue)
+    for s in load_sections(paths):
+        normalised = normalise_for_segmentation(s.cd31, s.tissue)
         response = jerman_vesselness(normalised, SIGMAS, SPACING, reference_lambda=REFERENCE)
-        proxy = visible_vessel_proxy(normalised, tissue)
+        proxy = visible_vessel_proxy(normalised, s.tissue)
 
         for name, (low, high) in [("narrow", NARROW), ("wide", WIDE)]:
-            from vessel_utils.threshold import hysteresis_threshold
-            mask = clean_mask(hysteresis_threshold(response, low, high) & tissue,
+            mask = clean_mask(hysteresis_threshold(response, low, high) & s.tissue,
                               min_size=MIN_VESSEL_PX, area_threshold=0, closing_radius=1)
             r = recall_by_brightness(mask, proxy, normalised)
             dim[name].append(r["dim"])
-            print(f"{mouse + ' ' + region:22s}{name:8s}{r['dim']:7.2f}{r['mid']:7.2f}"
+            print(f"{s.mouse + ' ' + s.region:22s}{name:8s}{r['dim']:7.2f}{r['mid']:7.2f}"
                   f"{r['bright']:8.2f}{mask.mean():8.3f}")
 
     print(f"\nmean dim-vessel recall:  narrow gap {np.nanmean(dim['narrow']):.2f}   "

@@ -47,6 +47,7 @@ import hashlib
 import re
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -218,9 +219,7 @@ def analyse(path, reference):
     enrichment = float(in_vessel.mean() / outside.mean())
 
     # Virus-positive, calibrated against this image's own parenchyma.
-    background = float(np.median(outside))
-    mad = float(1.4826 * np.median(np.abs(outside - background)))
-    cut = background + VIRUS_K * mad
+    cut, background = virus_cut(green, parenchyma)
     virus_positive = (green > cut) & tissue
 
     coverage = float((virus_positive & vessels).sum() / vessels.sum())
@@ -289,6 +288,102 @@ def curated_paths(pilot_mice=None, slices_per_region=None):
         seen[(mouse, region)] += 1
         chosen.append(path)
     return chosen
+
+
+# --------------------------------------------------------------------------
+# shared section loading
+#
+# Every analysis and figure script needs the same preamble: pick the pilot or
+# full path list, parse the filename, check the file really is a two-channel
+# composite, cast to float32, build the tissue mask, and skip-with-a-reason
+# anything that fails. That block was copied into eight scripts and drifted; it
+# lives here once now, and a script's loop is `for s in load_sections(paths)`.
+# --------------------------------------------------------------------------
+
+def short_reporter(reporter):
+    """Filename reporter field to its display form: 'SYFP2-green' -> 'SYFP2'."""
+    return "SYFP2" if "SYFP2" in reporter else "tdT" if "tdT" in reporter else reporter
+
+
+@dataclass(frozen=True)
+class Section:
+    """One loaded, tissue-masked section, with its identifiers already parsed."""
+    path: Path
+    index: int
+    total: int
+    figure: str
+    mouse: str
+    region: str
+    reporter: str        # display form, from short_reporter
+    reporter_raw: str    # exactly as it appears in the filename
+    slice_id: str        # "" when the filename carries no slice number
+    virus: np.ndarray
+    cd31: np.ndarray
+    tissue: np.ndarray
+
+    @property
+    def label(self):
+        """Human-readable, e.g. 'Fig 1 M131 cervical s3'."""
+        return (f"{self.figure} {self.mouse} {REGION_NAME[self.region]}"
+                + (f" s{self.slice_id}" if self.slice_id else ""))
+
+    @property
+    def stem(self):
+        """Gallery filename stem, e.g. 'Fig1_M131_C_SYFP2_s3'."""
+        return (f"{self.figure.replace(' ', '')}_{self.mouse}_{self.region}"
+                f"_{self.reporter}_s{self.slice_id or '0'}")
+
+    @property
+    def counter(self):
+        """'[ 7/39]' - the progress prefix every script prints."""
+        return f"[{self.index:2d}/{self.total}]"
+
+
+def section_paths(full=False, slices_per_region=1, pilot_mice=2):
+    """Everything curated with --full, else a pilot subset of it."""
+    return (curated_paths() if full
+            else curated_paths(pilot_mice=pilot_mice,
+                               slices_per_region=slices_per_region))
+
+
+def load_sections(paths):
+    """Yield each usable section, loaded and tissue-masked.
+
+    A section that is not a two-channel composite, or whose tissue mask fails,
+    is reported and skipped rather than taking the whole run down - the same
+    behaviour each script implemented separately.
+    """
+    total = len(paths)
+    for index, path in enumerate(paths, 1):
+        figure, mouse, region, reporter_raw, slice_id = NAME.match(path.name).groups()
+        stack = tifffile.imread(path)
+        if stack.ndim != 3 or stack.shape[0] != 2:
+            print(f"[{index:2d}/{total}] SKIP {path.name}: not 2-channel")
+            continue
+        virus, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
+        try:
+            tissue = tissue_mask(virus, cd31)
+        except ValueError as error:
+            print(f"[{index:2d}/{total}] SKIP {path.name}: {error}")
+            continue
+        yield Section(path=path, index=index, total=total, figure=figure,
+                      mouse=mouse, region=region,
+                      reporter=short_reporter(reporter_raw),
+                      reporter_raw=reporter_raw, slice_id=slice_id or "",
+                      virus=virus, cd31=cd31, tissue=tissue)
+
+
+def virus_cut(virus, parenchyma, k=VIRUS_K):
+    """Virus-positive threshold, calibrated on this image's own parenchyma.
+
+    Per-image by design: the dataset README notes brightness was adjusted per
+    image, so a fixed absolute cut would confound acquisition settings with
+    biology. Returns (cut, background) - the background median is reported
+    alongside the cut so a section's calibration is visible in the CSV.
+    """
+    background = float(np.median(virus[parenchyma]))
+    mad = float(1.4826 * np.median(np.abs(virus[parenchyma] - background)))
+    return background + k * mad, background
 
 
 def main():

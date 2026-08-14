@@ -1,8 +1,9 @@
 # Building the reference RORPO
 
-`scripts/path_operator.py` is a RORPO-family stand-in that runs with no build.
-For the reference results, build the real thing on a machine with a C++
-toolchain — this sandbox has neither cmake nor a compiler, so it cannot.
+Build the real thing on a machine with a C++ toolchain. (A pure-numpy
+RORPO-family stand-in once lived at `scripts/path_operator.py`; it was never
+called from anything and has been removed — recover it from git history if a
+build-free approximation is wanted again.)
 
 Source: https://github.com/path-openings/RORPO
 Paper: Merveille et al., "Curvilinear Structure Analysis by Ranking the

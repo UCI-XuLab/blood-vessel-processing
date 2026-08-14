@@ -30,12 +30,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import NAME, REGION_NAME, curated_paths, tissue_mask  # noqa: E402
+from analyse_spinal_cord import load_sections, section_paths                   # noqa: E402
 # top_q_mask lives in enrichment_by_cd31_percentile (the metric and the visuals must
 # use the same speck-cleaned mask); re-exported here so downstream scripts that do
 # `from visualize_sections import top_q_mask` keep working.
@@ -126,64 +125,56 @@ def _thumbnail(green, tissue, cd31):
     return _result_rgb(green[s], tissue[s], vessels[s])
 
 
-def contact_sheet(thumbs, png_path):
-    """Tile one result thumbnail per section into a single overview image."""
-    if not thumbs:
+def contact_sheet(tiles, png_path, suptitle, dpi=120, tile_width=2.6):
+    """Tile one thumbnail per section into a single overview image.
+
+    Shared by the three galleries (this one, zoom_crops, virus_vasculature).
+    `tiles` is (caption, image) pairs: the caption is the only thing that really
+    differs between them, so the caller formats its own rather than the sheet
+    guessing which metric to print.
+    """
+    if not tiles:
         return
-    cols = min(6, len(thumbs))
-    rows = (len(thumbs) + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(2.6 * cols, 2.9 * rows),
+    cols = min(6, len(tiles))
+    rows = (len(tiles) + cols - 1) // cols
+    fig, axes = plt.subplots(rows, cols, figsize=(tile_width * cols, 2.9 * rows),
                              squeeze=False)
     for ax in axes.ravel():
         ax.axis("off")
-    for (label, thumb, enrich), ax in zip(thumbs, axes.ravel()):
-        ax.imshow(thumb)
-        title = f"{label}\nenrich {enrich:.2f}" if not np.isnan(enrich) else f"{label}\nenrich n/a"
-        ax.set_title(title, fontsize=8)
-    fig.suptitle(f"All sections - virus on top-{VIS_Q}% CD31 vessels "
-                 "(green = virus-rich)", fontsize=12)
+    for (caption, image), ax in zip(tiles, axes.ravel()):
+        ax.imshow(image)
+        ax.set_title(caption, fontsize=8)
+    fig.suptitle(suptitle, fontsize=12)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
-    fig.savefig(png_path, dpi=120, bbox_inches="tight")
+    fig.savefig(png_path, dpi=dpi, bbox_inches="tight")
     plt.close(fig)
     print(f"wrote {png_path}")
 
 
 def main():
     full = "--full" in sys.argv
-    paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=1)
+    paths = section_paths(full)
     print(f"{len(paths)} sections ({'all' if full else 'pilot'})\n")
 
     out = Path(__file__).resolve().parent.parent / "results" / "section_panels"
     out.mkdir(parents=True, exist_ok=True)
 
-    thumbs = []
-    for index, path in enumerate(paths, 1):
-        figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
-        reporter = ("SYFP2" if "SYFP2" in reporter
-                    else "tdT" if "tdT" in reporter else reporter)
-        label = f"{figure} {mouse} {REGION_NAME[region]}" + (f" s{slice_id}" if slice_id else "")
+    tiles = []
+    for s in load_sections(paths):
+        curve = enrichment_curve(s.virus, s.cd31, s.tissue)
+        png = out / f"{s.stem}.png"
+        panel(s.virus, s.cd31, s.tissue, curve, f"{s.label}  ({s.reporter})", png)
+        enrich = curve[VIS_Q]
+        tiles.append((f"{s.label}\nenrich {enrich:.2f}" if not np.isnan(enrich)
+                      else f"{s.label}\nenrich n/a",
+                      _thumbnail(s.virus, s.tissue, s.cd31)))
+        print(f"{s.counter} {png.name}   enrich q{VIS_Q}={enrich:.2f}")
 
-        stack = tifffile.imread(path)
-        if stack.ndim != 3 or stack.shape[0] != 2:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: not 2-channel")
-            continue
-        green, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        try:
-            tissue = tissue_mask(green, cd31)
-        except ValueError as error:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
-            continue
-        curve = enrichment_curve(green, cd31, tissue)
-
-        png = out / (f"{figure.replace(' ', '')}_{mouse}_{region}_{reporter}"
-                     f"_s{slice_id or '0'}.png")
-        panel(green, cd31, tissue, curve, f"{label}  ({reporter})", png)
-        thumbs.append((label, _thumbnail(green, tissue, cd31), curve[VIS_Q]))
-        print(f"[{index:2d}/{len(paths)}] {png.name}   enrich q{VIS_Q}={curve[VIS_Q]:.2f}")
-
-    print(f"\nwrote {len(thumbs)} panels to {out}")
-    contact_sheet(thumbs, out.parent / ("section_contact_sheet_full.png" if full
-                                        else "section_contact_sheet_pilot.png"))
+    print(f"\nwrote {len(tiles)} panels to {out}")
+    contact_sheet(tiles, out.parent / ("section_contact_sheet_full.png" if full
+                                       else "section_contact_sheet_pilot.png"),
+                  f"All sections - virus on top-{VIS_Q}% CD31 vessels "
+                  "(green = virus-rich)")
 
 
 if __name__ == "__main__":

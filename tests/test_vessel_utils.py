@@ -411,19 +411,19 @@ def test_write_csv_round_trips(tmp_path):
 # package surface
 # --------------------------------------------------------------------------
 
-def test_every_exported_name_resolves():
-    import vessel_utils
-    for name in vessel_utils.__all__:
-        assert callable(getattr(vessel_utils, name)), name
-
-
 def test_metrics_do_not_require_the_vesselness_dependencies():
-    """Lazy re-export: reaching for a metric must not import the filter stack."""
+    """Reaching for a metric must not import the filter stack.
+
+    `vessel_utils/__init__.py` imports nothing, so a submodule import pulls in
+    that submodule and no other. Anything added to the package `__init__` would
+    break this.
+    """
     import subprocess
     import sys
     code = (
-        "import sys, vessel_utils;"
-        "vessel_utils.dice;"
+        "import sys;"
+        "from vessel_utils import metrics;"
+        "metrics.dice;"
         "assert 'vessel_utils.vesselness' not in sys.modules, sorted(sys.modules)"
     )
     subprocess.run([sys.executable, "-c", code], check=True, cwd=str(

@@ -34,7 +34,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -42,44 +41,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vessel_utils.threshold import segment                       # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness            # noqa: E402
 
-from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, curated_paths,  # noqa: E402
-                                 normalise_for_segmentation, tissue_mask)
+from analyse_spinal_cord import (NAME, REGION_NAME as LONG, SIGMAS,       # noqa: E402
+                                 UM_PER_PX, load_sections,
+                                 normalise_for_segmentation, section_paths)
 
 SPACING = (UM_PER_PX, UM_PER_PX)
 REFERENCE = 2.5           # graded, not saturated, on these sections
 THRESHOLDS = [0.05, 0.10, 0.20, 0.35, 0.50, 0.70, 0.90]
 MIN_VESSEL_PX = int(round(6.0 / UM_PER_PX ** 2))
 REGIONS = ("C", "T", "L")
-LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar"}
 PLAUSIBLE = (0.01, 0.10)  # CNS vessel area fraction in a section
 
 
-def prepare(path):
+def prepare(section):
     """Per-section work that does not depend on the threshold."""
-    stack = tifffile.imread(path)
-    green = stack[0].astype(np.float32)
-    cd31 = stack[1].astype(np.float32)
-    tissue = tissue_mask(green, cd31)   # raises on an unsegmentable section
-    response = jerman_vesselness(normalise_for_segmentation(cd31, tissue),
-                                 SIGMAS, SPACING, reference_lambda=REFERENCE)
-    return green, tissue, response
+    response = jerman_vesselness(
+        normalise_for_segmentation(section.cd31, section.tissue),
+        SIGMAS, SPACING, reference_lambda=REFERENCE)
+    return section.virus, section.tissue, response
 
 
 def main():
-    paths = [p for p in curated_paths(pilot_mice=2, slices_per_region=3)
+    paths = [p for p in section_paths(slices_per_region=3)
              if NAME.match(p.name).group(4).startswith("SYFP2")]
     print(f"{len(paths)} SYFP2 sections, 2 mice x 3 regions x 3 slices")
     print(f"reference_lambda fixed at {REFERENCE}; sweeping the threshold\n")
 
     prepared = {}
-    for index, path in enumerate(paths, 1):
-        _, mouse, region, _, slice_id = NAME.match(path.name).groups()
-        try:
-            prepared[(mouse, region, slice_id)] = prepare(path)
-        except ValueError as error:
-            print(f"  [{index:2d}/{len(paths)}] SKIP {mouse} {region} slice {slice_id}: {error}")
-            continue
-        print(f"  [{index:2d}/{len(paths)}] {mouse} {region} slice {slice_id}")
+    for s in load_sections(paths):
+        prepared[(s.mouse, s.region, s.slice_id)] = prepare(s)
+        print(f"  {s.counter} {s.mouse} {s.region} slice {s.slice_id}")
 
     graded = np.mean([np.mean((r[2][r[1]] > 0.01) & (r[2][r[1]] < 0.99))
                       for r in prepared.values()])
