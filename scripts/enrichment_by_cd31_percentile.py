@@ -39,8 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analyse_spinal_cord import (REGION_NAME as LONG, UM_PER_PX,             # noqa: E402
-                                 load_sections, section_paths, virus_cut)
-from vessel_utils.sweep import write_csv                                      # noqa: E402
+                                 load_sections, section_paths, virus_cut,
+                                 write_csv)
 
 PERCENTILES = (2, 5, 10, 20, 30)   # top-q% of CD31 called vessel
 REGIONS = ("C", "T", "L", "TL")

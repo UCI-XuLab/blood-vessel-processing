@@ -42,6 +42,7 @@ Artefact handling:
     it is why off_target is reported separately rather than folded into a score
 """
 
+import csv
 import hashlib
 import re
 import sys
@@ -56,7 +57,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vessel_utils import metrics                                   # noqa: E402
 from vessel_utils._vendor import compute_entropy_grabcut, EntropyGrabCutConfig  # noqa: E402
-from vessel_utils.sweep import write_csv                           # noqa: E402
 from vessel_utils.threshold import segment                         # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue  # noqa: E402
 
@@ -394,6 +394,23 @@ def load_sections(paths):
                       reporter=short_reporter(reporter_raw),
                       slice_id=slice_id or "",
                       virus=virus, cd31=cd31, tissue=tissue)
+
+
+def write_csv(rows, path):
+    """Write a list of uniform dicts to CSV, taking the header from the first.
+
+    Lived in `vessel_utils.sweep` until that module went; it only ever served
+    the three result CSVs written here, so it sits with them rather than in the
+    library. Raising on empty beats writing a header-only file that reads as a
+    successful run with no sections.
+    """
+    if not rows:
+        raise ValueError("no rows to write")
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    return path
 
 
 def virus_cut(parenchyma_values, k=VIRUS_K):

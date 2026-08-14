@@ -16,11 +16,8 @@ dependencies = [
     "scikit-image",
     "scipy",
     "SimpleITK",
-    "zarr",
-    "dask",
     "tifffile",
-    "PyWavelets",
-    "tqdm",
+    "tqdm",          # the archive notebooks' batch loops
 ]
 
 [project.optional-dependencies]

@@ -51,9 +51,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analyse_spinal_cord import (NAME, REGION_NAME as LONG, SIGMAS, UM_PER_PX,   # noqa: E402
                                  normalise_for_segmentation, section_paths,
-                                 short_reporter, tissue_mask)
+                                 short_reporter, tissue_mask, write_csv)
 from vessel_utils import metrics                                                 # noqa: E402
-from vessel_utils.sweep import write_csv                                         # noqa: E402
 from vessel_utils.threshold import segment                                       # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness                            # noqa: E402
 

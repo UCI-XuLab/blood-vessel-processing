@@ -52,18 +52,14 @@ Both packages are split by pipeline stage, so an import block reads as a descrip
 
 | module | contents |
 | --- | --- |
-| [storage.py](vessel_utils/storage.py) | `plane_series_to_zarr`, `open_volume`, `write_volume`, `read_spacing` |
-| [correct.py](vessel_utils/correct.py) | `destripe`, `tissue_mask`, `depth_profile`, `correct_depth_attenuation` |
-| [chunked.py](vessel_utils/chunked.py) | `overlap_depth`, `map_blocks_with_halo`, `apply_vesselness` |
-| [synth.py](vessel_utils/synth.py) | `vascular_tree`, `render_tree`, `simulate_acquisition`, `phantom` |
-| [ensemble.py](vessel_utils/ensemble.py) | `consensus`, `disagreement_map`, `pairwise_agreement`, `redundancy` |
-| [benchmark.py](vessel_utils/benchmark.py) | `score_segmentation`, `run_benchmark`, `sweep_condition`, `summarise` |
-| [qc.py](vessel_utils/qc.py) | `intake_report`, `resolvability`, `compare_channels`, `estimate_attenuation` |
-| [validate.py](vessel_utils/validate.py) | `stratified_sample`, `estimate_accuracy`, `agreement_by_depth` |
 | [vesselness.py](vessel_utils/vesselness.py) | `jerman_vesselness`, `hessian_eigenvalues`, `max_eigenvalue` |
 | [threshold.py](vessel_utils/threshold.py) | `hysteresis_threshold`, `otsu_threshold`, `clean_mask`, `segment` |
 | [metrics.py](vessel_utils/metrics.py) | `dice`, `jaccard`, `precision`, `recall`, `cl_dice`, `area_fraction`, `agreement`, `agreement_by_calibre` |
-| [sweep.py](vessel_utils/sweep.py) | `threshold_sweep`, `stability`, `write_csv` |
+| [synth.py](vessel_utils/synth.py) | `vascular_tree`, `render_tree`, `simulate_acquisition`, `phantom` |
+| [benchmark.py](vessel_utils/benchmark.py) | `score_segmentation`, `run_benchmark`, `sweep_condition`, `summarise` |
+| [_vendor/](vessel_utils/_vendor/) | `compute_entropy_grabcut`, `EntropyGrabCutConfig` — the tissue masker, vendored from UCI-XuLab-RegTools |
+
+**Removed, and why it matters if you go looking for it.** `storage`, `chunked` and `correct` (chunked OME-Zarr conversion, halo-sized blockwise filtering, lightsheet destriping and depth-attenuation correction), plus `qc`, `validate`, `ensemble` and `sweep`, were built for whole-brain lightsheet volumes and validation designs that no analysis here ever ran — every one of their callers was its own test. They were deleted rather than left to read as a description of work that happened; `git log` has them if that work restarts, and the design reasoning is preserved in the sections below. That also dropped `zarr`, `dask` and `PyWavelets` from the dependencies. **Do not re-add a module here speculatively** — the last round cost ~2,000 lines and three dependencies carrying nothing.
 
 ### Why the active package differs
 
@@ -75,20 +71,14 @@ Three deliberate departures, each addressing a consistency problem in the archiv
 
 `vessel_utils.metrics.jaccard` is named differently from the archive's `iou` on purpose — it binarises first, so it agrees with the archive on boolean input and is simply correct on numeric input.
 
-### Working at whole-brain scale
+### If whole-brain lightsheet work restarts
 
-A raw acquisition is ~2600 planes of ~10k x 10k, about 500 GB per channel. Three consequences shape the active package:
+None of this is in the tree — it was removed with `storage`/`chunked`/`correct` (recover them with `git log -- vessel_utils/storage.py`). It is recorded because each point cost real debugging and none of it is obvious:
 
-- **Convert to Zarr once, before anything else.** A directory of one TIFF per plane is the worst layout for 3D work: a 64-voxel-deep column means opening 64 files and decoding 64 full planes. `plane_series_to_zarr` writes chunked blocks plus a pyramid; coarse levels exist so tissue masks and depth profiles, which need no capillary detail, are cheap.
-- **Halos must match the filter's actual reach.** `overlap_depth` sizes them from the largest sigma *in physical units*, so anisotropic spacing gives different halos per axis. `GAUSSIAN_TRUNCATE` is **4.0** because that is what `scipy.ndimage.gaussian_filter` actually uses — the conventional 3σ figure undersizes the halo and leaves a real seam at every chunk boundary, which on a vessel mask severs vessels and changes topology.
-- **`apply_vesselness` refuses to run without `reference_lambda`.** Per-block regularisation would make the response mean something different in every chunk, turning seams into genuine discontinuities.
-
-### Lightsheet corrections
-
-Both artefacts corrected in [correct.py](vessel_utils/correct.py) are *channel-asymmetric*, which is why they corrupt a comparison rather than merely degrading it:
-
-- **Stripes** are linear structures, exactly what a Hessian filter is built to fire on — so they are false vessels, not background noise. `destripe` cannot separate a stripe from a vessel running the full width parallel to the illumination axis; that limitation is documented and pinned by a test.
-- **Depth attenuation** differs by wavelength (488/561/640), so uncorrected it puts a channel-dependent gradient straight into the agreement metric. **Correct each channel with its own profile** — sharing one reintroduces the asymmetry. `depth_profile` uses the median rather than the mean because vessels are a bright minority and a mean tracks vessel density as much as illumination.
+- **A raw acquisition is ~2600 planes of ~10k x 10k, ~500 GB per channel.** Convert to a chunked store *before* anything else. One TIFF per plane is the worst layout for 3D work: a 64-voxel-deep column means opening 64 files and decoding 64 full planes. Chunked blocks plus a pyramid fixes it — and coarse levels matter, because tissue masks and depth profiles need no capillary detail.
+- **Halos must match the filter's *actual* reach, in physical units.** `scipy.ndimage.gaussian_filter` truncates at **4.0σ**, not the 3σ conventionally quoted. Sizing a halo at 3σ leaves a real seam at every chunk boundary — small in absolute terms, but concentrated exactly where it severs vessels and changes the topology every skeleton-based measure depends on. Anisotropic spacing means a different halo per axis.
+- **Never regularise per block.** A per-block `reference_lambda` makes the response mean something different in every chunk, turning seams into genuine discontinuities rather than edge artefacts.
+- **Both lightsheet artefacts are channel-asymmetric**, which is why they corrupt a comparison rather than merely degrading it. Stripes are linear structures — exactly what a Hessian filter fires on — so they are false vessels, not background noise, and no method can separate a stripe from a vessel running the full width parallel to the illumination axis. Depth attenuation differs by wavelength (488/561/640), so **correct each channel with its own profile**; sharing one reintroduces the asymmetry. Estimate the profile with a median, not a mean: vessels are a bright minority, and a mean tracks vessel density as much as illumination.
 
 Each notebook opens with a bootstrap cell that walks up from the working directory to find the repo root (by looking for `pyproject.toml`) and adds it to `sys.path`. That is why `pip install -e .` is optional — do not remove the bootstrap, the lab runs these notebooks directly and must not acquire a setup step it can silently skip.
 
@@ -102,7 +92,7 @@ for s in load_sections(paths):                       # s.virus, s.cd31, s.tissue
     ...                                              # s.label, s.stem, s.counter
 ```
 
-`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for the per-section result CSVs.
+`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `write_csv` for the per-section result CSVs.
 
 **Three loaders remain outside it, deliberately.** If you change `load_sections`, check whether the change belongs in these too — they are what produce two of the three result CSVs:
 

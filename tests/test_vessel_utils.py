@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vessel_utils import metrics, sweep, threshold, vesselness
+from vessel_utils import metrics, threshold, vesselness
 
 
 # --------------------------------------------------------------------------
@@ -341,75 +341,6 @@ def test_metrics_reject_shape_mismatch():
 
 
 # --------------------------------------------------------------------------
-# sweep
-# --------------------------------------------------------------------------
-
-def two_channel_responses():
-    rng = np.random.default_rng(3)
-    truth = np.zeros((64, 64), dtype=float)
-    for row in range(8, 60, 12):
-        truth[row:row + 2, 4:60] = 1.0
-    a = np.clip(truth * 0.8 + rng.random(truth.shape) * 0.10, 0, 1)
-    b = np.clip(truth * 0.7 + rng.random(truth.shape) * 0.10, 0, 1)
-    return a, b
-
-
-def test_threshold_sweep_returns_one_row_per_threshold():
-    a, b = two_channel_responses()
-    thresholds = np.linspace(0.2, 0.6, 5)
-    rows = sweep.threshold_sweep(a, b, thresholds, min_size=1, area_threshold=0,
-                                 closing_radius=0)
-    assert len(rows) == len(thresholds)
-    assert rows[0]["threshold_low"] == pytest.approx(rows[0]["threshold_high"] * 0.5)
-    assert all("dice" in row for row in rows)
-
-
-def test_threshold_sweep_reports_progress_and_validates_inputs():
-    a, b = two_channel_responses()
-    seen = []
-    sweep.threshold_sweep(a, b, [0.3, 0.5], min_size=1, area_threshold=0,
-                          closing_radius=0, include_topology=False,
-                          progress=lambda i, n: seen.append((i, n)))
-    assert seen == [(1, 2), (2, 2)]
-
-    with pytest.raises(ValueError):
-        sweep.threshold_sweep(a, b[:10], [0.3])
-    with pytest.raises(ValueError):
-        sweep.threshold_sweep(a, b, [0.3], ratio=0.0)
-
-
-def test_stability_finds_a_plateau():
-    rows = [{"threshold_high": t, "dice": d} for t, d in
-            [(0.1, 0.20), (0.2, 0.80), (0.3, 0.81), (0.4, 0.82), (0.5, 0.80),
-             (0.6, 0.30)]]
-    result = sweep.stability(rows, "dice", tolerance=0.05)
-    assert result["threshold_low"] == 0.2
-    assert result["threshold_high"] == 0.5
-    assert result["coverage"] == pytest.approx(4 / 6)
-
-
-def test_stability_reports_a_narrow_plateau_when_there_is_none():
-    rows = [{"threshold_high": t, "dice": d} for t, d in
-            [(0.1, 0.1), (0.2, 0.4), (0.3, 0.7), (0.4, 0.95)]]
-    result = sweep.stability(rows, "dice", tolerance=0.05)
-    assert result["coverage"] < 0.6
-    with pytest.raises(ValueError):
-        sweep.stability([], "dice")
-
-
-def test_write_csv_round_trips(tmp_path):
-    import csv as csv_module
-    a, b = two_channel_responses()
-    rows = sweep.threshold_sweep(a, b, [0.3, 0.5], min_size=1, area_threshold=0,
-                                 closing_radius=0, include_topology=False)
-    path = sweep.write_csv(rows, tmp_path / "sweep.csv")
-    with open(path, encoding="utf-8") as handle:
-        loaded = list(csv_module.DictReader(handle))
-    assert len(loaded) == 2
-    assert float(loaded[0]["threshold_high"]) == pytest.approx(0.3)
-
-
-# --------------------------------------------------------------------------
 # package surface
 # --------------------------------------------------------------------------
 
@@ -454,18 +385,6 @@ def test_metrics_do_not_require_the_vesselness_dependencies():
         "from vessel_utils import metrics;"
         "metrics.dice;"
         "assert 'vessel_utils.vesselness' not in sys.modules, sorted(sys.modules)"
-    )
-
-
-def test_write_csv_does_not_drag_in_the_filter_stack():
-    """`sweep.write_csv` is generic, and its callers include scripts that
-    segment nothing. Its module must not import the filter stack eagerly."""
-    _run_isolated(
-        "import sys;"
-        "from vessel_utils.sweep import write_csv;"
-        "leaked = [m for m in ('vessel_utils.threshold', 'vessel_utils.metrics')"
-        "          if m in sys.modules];"
-        "assert not leaked, f'sweep eagerly imported {leaked}'"
     )
 
 

@@ -31,15 +31,9 @@ Where follow-up work happens. It is free to differ from the archive:
 | `vesselness` | Jerman vesselness — physical scales, 2D and 3D, response bounded in [0,1] |
 | `threshold` | hysteresis thresholding and mask clean-up |
 | `metrics` | Dice, Jaccard, precision, recall, clDice, area fractions, agreement by vessel calibre |
-| `sweep` | threshold sensitivity analysis |
-| `storage` | chunked OME-Zarr conversion for volumes larger than memory |
-| `correct` | lightsheet destriping and depth attenuation correction |
-| `chunked` | running filters over large volumes with correctly sized halos |
 | `synth` | synthetic vasculature with a simulated lightsheet acquisition |
-| `ensemble` | combining segmentations and mapping where they disagree |
 | `benchmark` | scoring a segmenter against phantoms with known ground truth |
-| `qc` | first-contact inspection of a new acquisition |
-| `validate` | accuracy on real data without dense annotation |
+| `_vendor` | entropy-guided GrabCut tissue masker, vendored from UCI-XuLab-RegTools |
 
 The main differences: sigmas are in physical units rather than voxels, so anisotropic data is handled correctly; the vesselness response has an absolute scale rather than being rescaled per image, so one threshold means the same thing in both channels and across slices; and the metric set drops four measures that carry little information on binary masks in favour of `clDice`, which compares centrelines and so registers connectivity disagreements that voxel overlap misses.
 
