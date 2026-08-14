@@ -30,25 +30,25 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import NAME, REGION_NAME, curated_paths, tissue_mask   # noqa: E402
-from enrichment_by_cd31_percentile import VIRUS_K, coverage_curve, enrichment_curve  # noqa: E402
-from visualize_sections import VIS_Q, _clip, top_q_mask                          # noqa: E402
+from analyse_spinal_cord import load_sections, section_paths, virus_cut         # noqa: E402
+from enrichment_by_cd31_percentile import enrichment_curve                      # noqa: E402
+from visualize_sections import VIS_Q, _clip, contact_sheet, top_q_mask          # noqa: E402
 
 DS = 2
 THUMB_PX = 240
 
 
 def virus_positive(virus, tissue, vessels):
-    """Per-image virus-positive: parenchyma median + VIRUS_K*MAD (the pipeline rule)."""
-    parenchyma = tissue & ~vessels
-    background = np.median(virus[parenchyma])
-    mad = 1.4826 * np.median(np.abs(virus[parenchyma] - background))
-    return (virus > background + VIRUS_K * mad) & tissue
+    """Per-image virus-positive: the `virus_cut` rule, median + k*MAD on parenchyma.
+
+    `k` defaults to `analyse_spinal_cord.VIRUS_K`, which is where to change it.
+    """
+    cut, _ = virus_cut(virus[tissue & ~vessels])
+    return (virus > cut) & tissue
 
 
 def _labelled_rgb(virus, tissue, on_vessel):
@@ -107,58 +107,27 @@ def _thumbnail(virus, cd31, tissue):
     return _labelled_rgb(virus[s], tissue[s], on[s])
 
 
-def contact_sheet(thumbs, png_path):
-    if not thumbs:
-        return
-    cols = min(6, len(thumbs))
-    rows = (len(thumbs) + cols - 1) // cols
-    fig, axes = plt.subplots(rows, cols, figsize=(2.6 * cols, 2.9 * rows), squeeze=False)
-    for ax in axes.ravel():
-        ax.axis("off")
-    for (label, thumb, coverage), ax in zip(thumbs, axes.ravel()):
-        ax.imshow(thumb)
-        ax.set_title(f"{label}\ncoverage {coverage:.2f}", fontsize=8)
-    fig.suptitle(f"Virus-labelled vasculature (virus⁺ on top-{VIS_Q}% CD31 vessels) "
-                 "- every section", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.98))
-    fig.savefig(png_path, dpi=120, bbox_inches="tight")
-    plt.close(fig)
-    print(f"wrote {png_path}")
-
-
 def main():
     full = "--full" in sys.argv
-    paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=1)
+    paths = section_paths(full)
     print(f"{len(paths)} sections ({'all' if full else 'pilot'})\n")
 
     out = Path(__file__).resolve().parent.parent / "results" / "virus_vasculature"
     out.mkdir(parents=True, exist_ok=True)
 
-    thumbs = []
-    for index, path in enumerate(paths, 1):
-        figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
-        reporter = ("SYFP2" if "SYFP2" in reporter
-                    else "tdT" if "tdT" in reporter else reporter)
-        label = f"{figure} {mouse} {REGION_NAME[region]}" + (f" s{slice_id}" if slice_id else "")
-        stack = tifffile.imread(path)
-        if stack.ndim != 3 or stack.shape[0] != 2:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: not 2-channel")
-            continue
-        virus, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        try:
-            tissue = tissue_mask(virus, cd31)
-        except ValueError as error:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
-            continue
-        png = out / (f"{figure.replace(' ', '')}_{mouse}_{region}_{reporter}"
-                     f"_s{slice_id or '0'}.png")
-        coverage = panel(virus, cd31, tissue, f"{label}  ({reporter})", png)
-        thumbs.append((label, _thumbnail(virus, cd31, tissue), coverage))
-        print(f"[{index:2d}/{len(paths)}] {png.name}   coverage {coverage:.2f}")
+    tiles = []
+    for s in load_sections(paths):
+        png = out / f"{s.stem}.png"
+        coverage = panel(s.virus, s.cd31, s.tissue, f"{s.label}  ({s.reporter})", png)
+        tiles.append((f"{s.label}\ncoverage {coverage:.2f}",
+                      _thumbnail(s.virus, s.cd31, s.tissue)))
+        print(f"{s.counter} {png.name}   coverage {coverage:.2f}")
 
-    print(f"\nwrote {len(thumbs)} panels to {out}")
-    contact_sheet(thumbs, out.parent / ("virus_vasculature_contact_full.png" if full
-                                        else "virus_vasculature_contact_pilot.png"))
+    print(f"\nwrote {len(tiles)} panels to {out}")
+    contact_sheet(tiles, out.parent / ("virus_vasculature_contact_full.png" if full
+                                       else "virus_vasculature_contact_pilot.png"),
+                  f"Virus-labelled vasculature (virus⁺ on top-{VIS_Q}% CD31 vessels) "
+                  "- every section")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,8 @@ response is bounded and calibre-uniform, that a fixed reference removes the
 per-image dependence, and that the metrics behave the way the docstrings say.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -411,23 +413,60 @@ def test_write_csv_round_trips(tmp_path):
 # package surface
 # --------------------------------------------------------------------------
 
-def test_every_exported_name_resolves():
-    import vessel_utils
-    for name in vessel_utils.__all__:
-        assert callable(getattr(vessel_utils, name)), name
+def _run_isolated(code):
+    """Run `code` in a fresh interpreter; surface its assertion text on failure.
+
+    Both import-hygiene tests need a clean `sys.modules`, which only a separate
+    process gives. `check=True` alone would report a bare CalledProcessError, so
+    capture the output and put the assertion message in the pytest failure.
+    """
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True,
+        cwd=str(Path(__file__).resolve().parent.parent))
+    assert result.returncode == 0, result.stderr.strip() or result.stdout.strip()
+
+
+def test_package_init_stays_empty():
+    """`vessel_utils/__init__.py` must import nothing.
+
+    This is the property the whole import scheme rests on, and it needs pinning
+    directly: asserting that some *particular* module stays out of `sys.modules`
+    does not, because a submodule that shares its dependencies could be imported
+    eagerly and the assertion would still pass. So check the package namespace
+    itself - a bare `import vessel_utils` must bring no submodule with it.
+    """
+    _run_isolated(
+        "import sys, types, vessel_utils;"
+        "loaded = [n for n, v in vars(vessel_utils).items()"
+        "          if isinstance(v, types.ModuleType) and not n.startswith('__')];"
+        "assert not loaded, f'__init__ eagerly imported {loaded}';"
+        "leaked = sorted(m for m in sys.modules if m.startswith('vessel_utils.'));"
+        "assert not leaked, f'importing the package loaded {leaked}'"
+    )
 
 
 def test_metrics_do_not_require_the_vesselness_dependencies():
-    """Lazy re-export: reaching for a metric must not import the filter stack."""
-    import subprocess
-    import sys
-    code = (
-        "import sys, vessel_utils;"
-        "vessel_utils.dice;"
+    """Reaching for a metric must not import the filter stack."""
+    _run_isolated(
+        "import sys;"
+        "from vessel_utils import metrics;"
+        "metrics.dice;"
         "assert 'vessel_utils.vesselness' not in sys.modules, sorted(sys.modules)"
     )
-    subprocess.run([sys.executable, "-c", code], check=True, cwd=str(
-        __import__("pathlib").Path(__file__).resolve().parent.parent))
+
+
+def test_write_csv_does_not_drag_in_the_filter_stack():
+    """`sweep.write_csv` is generic, and its callers include scripts that
+    segment nothing. Its module must not import the filter stack eagerly."""
+    _run_isolated(
+        "import sys;"
+        "from vessel_utils.sweep import write_csv;"
+        "leaked = [m for m in ('vessel_utils.threshold', 'vessel_utils.metrics')"
+        "          if m in sys.modules];"
+        "assert not leaked, f'sweep eagerly imported {leaked}'"
+    )
 
 
 def test_max_eigenvalue_percentile_is_more_stable_than_the_max():

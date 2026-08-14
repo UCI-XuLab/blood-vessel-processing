@@ -36,7 +36,7 @@ The notebooks cannot be executed from a fresh clone: paths are hardcoded to `/me
 
 ## Architecture
 
-Both packages are split by pipeline stage, so an import block reads as a description of what the caller does. Both re-export lazily, so importing `metrics` does not drag in `itk`.
+Both packages are split by pipeline stage, so an import block reads as a description of what the caller does. Importing `metrics` does not drag in `itk` either way, but by different means: the frozen archive re-exports every name lazily through a `__getattr__`, while `vessel_utils/__init__.py` imports nothing at all and callers name the submodule (`from vessel_utils.threshold import segment`). Do not add imports to `vessel_utils/__init__.py` — a test pins the fact that it stays empty.
 
 **Archive — [velazquez_rivera_2025/](velazquez_rivera_2025/)** (frozen):
 
@@ -91,6 +91,28 @@ Both artefacts corrected in [correct.py](vessel_utils/correct.py) are *channel-a
 - **Depth attenuation** differs by wavelength (488/561/640), so uncorrected it puts a channel-dependent gradient straight into the agreement metric. **Correct each channel with its own profile** — sharing one reintroduces the asymmetry. `depth_profile` uses the median rather than the mean because vessels are a bright minority and a mean tracks vessel density as much as illumination.
 
 Each notebook opens with a bootstrap cell that walks up from the working directory to find the repo root (by looking for `pyproject.toml`) and adds it to `sys.path`. That is why `pip install -e .` is optional — do not remove the bootstrap, the lab runs these notebooks directly and must not acquire a setup step it can silently skip.
+
+### The spinal-cord scripts share one section loader
+
+[scripts/](scripts/) holds the follow-up spinal-cord analysis. Every script there needs the same preamble — pick the pilot or `--full` path list, parse the filename, check the file really is a two-channel composite, cast to float32, build the tissue mask, skip-with-a-reason anything that fails. That block was copied into eight scripts and drifted. It now lives in [analyse_spinal_cord.py](scripts/analyse_spinal_cord.py), and seven scripts use it:
+
+```python
+paths = section_paths(full, slices_per_region=3)     # pilot subset unless full
+for s in load_sections(paths):                       # s.virus, s.cd31, s.tissue
+    ...                                              # s.label, s.stem, s.counter
+```
+
+`section_paths(full=True, ...)` ignores the pilot arguments — `--full` means every section. Use the loader for anything new. Related shared pieces, same reason: `short_reporter`, `virus_cut` (the per-image `median + k*MAD` rule, which takes the already-extracted parenchyma values), `REGION_NAME`, `visualize_sections.contact_sheet`, and `vessel_utils.sweep.write_csv` for the per-section result CSVs.
+
+**Three loaders remain outside it, deliberately.** If you change `load_sections`, check whether the change belongs in these too — they are what produce two of the three result CSVs:
+
+| loader | why it stays |
+| --- | --- |
+| `analyse_spinal_cord.analyse()` | takes a path so its own `main()` and the notebooks can drive it per section; writes `spinal_cord_specificity.csv` |
+| `dice_between_channels.channels()` / `channel_masks()` | `notebooks/dice_between_channels.ipynb` calls `channel_masks(path)` and `score_section(path)` directly; changing the signature breaks a stored notebook |
+| `export_handoff.clean_stem()` + its loop | `clean_stem` omits the `_s0` suffix `Section.stem` always emits, so converting it renames every exported mask TIF its README references. A real inconsistency, just not one worth a rename |
+
+`plot_results.py`, `regional_stats.py` and `summarise_spinal_cord.py` read only CSVs and import none of this — pulling in the analysis module would drag `tifffile` and the vendored GrabCut along for a four-entry dict, so they keep their own `LONG`.
 
 ## What lives in the notebooks, not the archive
 

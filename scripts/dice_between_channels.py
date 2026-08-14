@@ -39,7 +39,6 @@ kept separate (Fig 1 and Fig 3 are different constructs; pooling would confound
 reporter/construct with region). Reads Z: read-only.
 """
 
-import csv
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -50,16 +49,17 @@ import tifffile
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import (NAME, SIGMAS, UM_PER_PX, curated_paths,          # noqa: E402
-                                 normalise_for_segmentation, tissue_mask)
+from analyse_spinal_cord import (NAME, REGION_NAME as LONG, SIGMAS, UM_PER_PX,   # noqa: E402
+                                 normalise_for_segmentation, section_paths,
+                                 short_reporter, tissue_mask)
 from vessel_utils import metrics                                                 # noqa: E402
+from vessel_utils.sweep import write_csv                                         # noqa: E402
 from vessel_utils.threshold import segment                                       # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness                            # noqa: E402
 
 # TL included so thoracolumbar sections (e.g. M87) appear in the summary rather
 # than being scored into the CSV but silently dropped from the printed tables.
 REGIONS = ("C", "T", "L", "TL")
-LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
 
 # Per-channel Jerman operating points (see module docstring). REFERENCE is graded,
 # not saturated, so the hysteresis thresholds actually bite. CD31 gets a vessel-
@@ -112,7 +112,7 @@ def score_section(path):
 
 def main():
     full = "--full" in sys.argv
-    paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=3)
+    paths = section_paths(full, slices_per_region=3)
     label = "all clean mice" if full else "pilot: 2 mice/reporter, 3 slices/region"
     print(f"{len(paths)} sections ({label})")
     print(f"CD31 thr {CD31_LOW}/{CD31_HIGH}, virus thr {VIRUS_LOW}/{VIRUS_HIGH}, "
@@ -121,7 +121,7 @@ def main():
     rows = []
     for index, path in enumerate(paths, 1):
         figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
-        reporter = "SYFP2" if "SYFP2" in reporter else ("tdT" if "tdT" in reporter else reporter)
+        reporter = short_reporter(reporter)
         try:
             result = score_section(path)
         except Exception as error:                                   # noqa: BLE001
@@ -137,12 +137,8 @@ def main():
         sys.exit("no sections scored")
     out = Path(__file__).resolve().parent.parent / "results"
     out.mkdir(exist_ok=True)
-    csv_path = out / ("dice_between_channels_full.csv" if full
-                      else "dice_between_channels_pilot.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    csv_path = write_csv(rows, out / ("dice_between_channels_full.csv" if full
+                                      else "dice_between_channels_pilot.csv"))
     print(f"\nwrote {csv_path}")
 
     # Mouse means first, grouped by (figure, reporter); figures kept separate.

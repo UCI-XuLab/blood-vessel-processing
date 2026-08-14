@@ -28,24 +28,22 @@ Grey/white matter is not separated - that confound is orthogonal and applies to
 the mask-based measure too. Reads Z: read-only.
 """
 
-import csv
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-import tifffile
 from skimage.morphology import remove_small_objects
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import NAME, UM_PER_PX, curated_paths, tissue_mask   # noqa: E402
+from analyse_spinal_cord import (REGION_NAME as LONG, UM_PER_PX,             # noqa: E402
+                                 load_sections, section_paths, virus_cut)
+from vessel_utils.sweep import write_csv                                      # noqa: E402
 
 PERCENTILES = (2, 5, 10, 20, 30)   # top-q% of CD31 called vessel
 REGIONS = ("C", "T", "L", "TL")
-LONG = {"C": "cervical", "T": "thoracic", "L": "lumbar", "TL": "thoracolumbar"}
-VIRUS_K = 3.0   # virus-positive = parenchyma median + k*MAD (matches analyse_spinal_cord)
 # Speck cleanup: drop connected components smaller than ~8 µm² (below a capillary
 # cross-section), so isolated bright-CD31 noise pixels are not counted as vessel.
 # On a clean section this changes the vessel area negligibly (0.1186 -> 0.1182);
@@ -95,8 +93,9 @@ def coverage_curve(virus, cd31, tissue):
     genuine neuronal expression, structurally vessel-like), so the vessel geometry
     comes from CD31 and the virus only decides which of those vessels are labelled.
 
-    "Virus-positive" is the pipeline's per-image rule (parenchyma median +
-    VIRUS_K*MAD), so a per-section brightness gain does not move it. Reported per q
+    "Virus-positive" is the pipeline's per-image rule (`virus_cut`: parenchyma
+    median + k*MAD, k from `analyse_spinal_cord.VIRUS_K`), so a per-section
+    brightness gain does not move it. Reported per q
     because "vessel" is the top-q% of CD31; the companion off-vessel area fraction
     is dominated by the vast parenchyma and is deliberately not returned here.
     """
@@ -107,39 +106,25 @@ def coverage_curve(virus, cd31, tissue):
         if not vessels.any() or not parenchyma.any():
             out[q] = float("nan")
             continue
-        background = np.median(virus[parenchyma])
-        mad = 1.4826 * np.median(np.abs(virus[parenchyma] - background))
-        virus_positive = virus > background + VIRUS_K * mad
-        out[q] = float((virus_positive & vessels).sum() / vessels.sum())
+        cut, _ = virus_cut(virus[parenchyma])
+        out[q] = float(((virus > cut) & vessels).sum() / vessels.sum())
     return out
 
 
 def main():
     full = "--full" in sys.argv
-    paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=3)
+    paths = section_paths(full, slices_per_region=3)
     print(f"{len(paths)} sections ({'all clean mice' if full else 'pilot'})\n")
 
     rows = []
-    for index, path in enumerate(paths, 1):
-        figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
-        reporter = "SYFP2" if "SYFP2" in reporter else ("tdT" if "tdT" in reporter else reporter)
-        stack = tifffile.imread(path)
-        if stack.ndim != 3 or stack.shape[0] != 2:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: not 2-channel")
-            continue
-        virus, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        try:
-            tissue = tissue_mask(virus, cd31)
-        except ValueError as error:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
-            continue
-        curve = enrichment_curve(virus, cd31, tissue)
-        cover = coverage_curve(virus, cd31, tissue)
-        rows.append({"figure": figure, "reporter": reporter, "mouse": mouse,
-                     "region": region, "slice": slice_id or "",
+    for s in load_sections(paths):
+        curve = enrichment_curve(s.virus, s.cd31, s.tissue)
+        cover = coverage_curve(s.virus, s.cd31, s.tissue)
+        rows.append({"figure": s.figure, "reporter": s.reporter, "mouse": s.mouse,
+                     "region": s.region, "slice": s.slice_id,
                      **{f"enrich_top{q}": curve[q] for q in PERCENTILES},
                      **{f"cover_top{q}": cover[q] for q in PERCENTILES}})
-        print(f"[{index:2d}/{len(paths)}] {figure} {reporter:5s} {mouse:7s} {region:2s}  "
+        print(f"{s.counter} {s.figure} {s.reporter:5s} {s.mouse:7s} {s.region:2s}  "
               + "enrich " + " ".join(f"q{q}={curve[q]:.2f}" for q in PERCENTILES)
               + f"   cover@5%={cover[5]:.2f}")
 
@@ -147,12 +132,8 @@ def main():
         sys.exit("no sections scored")
     out = Path(__file__).resolve().parent.parent / "results"
     out.mkdir(exist_ok=True)
-    csv_path = out / ("enrichment_cd31_percentile_full.csv" if full
-                      else "enrichment_cd31_percentile_pilot.csv")
-    with open(csv_path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    csv_path = write_csv(rows, out / ("enrichment_cd31_percentile_full.csv" if full
+                                      else "enrichment_cd31_percentile_pilot.csv"))
     print(f"\nwrote {csv_path}")
 
     # sections[(figure, reporter, mouse, region, q)] -> list of per-slice values.

@@ -22,13 +22,11 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
-import tifffile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analyse_spinal_cord import NAME, REGION_NAME, curated_paths, tissue_mask   # noqa: E402
+from analyse_spinal_cord import load_sections, section_paths                    # noqa: E402
 from dice_between_channels import (CD31_HIGH, CD31_LOW, VIRUS_HIGH,              # noqa: E402
                                    VIRUS_LOW, _segment)
 from visualize_sections import _clip                                            # noqa: E402
@@ -49,52 +47,36 @@ def _draw(ax, grey, mask, colour, title):
 
 def main():
     full = "--full" in sys.argv
-    paths = curated_paths() if full else curated_paths(pilot_mice=2, slices_per_region=1)
+    paths = section_paths(full)
     print(f"{len(paths)} sections ({'all' if full else 'pilot'})\n")
 
     out = Path(__file__).resolve().parent.parent / "results" / "segmentation_contours"
     out.mkdir(parents=True, exist_ok=True)
 
-    for index, path in enumerate(paths, 1):
-        figure, mouse, region, reporter, slice_id = NAME.match(path.name).groups()
-        reporter = ("SYFP2" if "SYFP2" in reporter
-                    else "tdT" if "tdT" in reporter else reporter)
-        stack = tifffile.imread(path)
-        if stack.ndim != 3 or stack.shape[0] != 2:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: not 2-channel")
-            continue
-        virus, cd31 = stack[0].astype(np.float32), stack[1].astype(np.float32)
-        try:
-            tissue = tissue_mask(virus, cd31)
-        except ValueError as error:
-            print(f"[{index:2d}/{len(paths)}] SKIP {path.name}: {error}")
-            continue
-
+    for s in load_sections(paths):
         panels = [
-            ("CD31 (ground truth)", cd31,
-             _segment(cd31, tissue, CD31_LOW, CD31_HIGH), CD31_COLOUR,
+            ("CD31 (ground truth)", s.cd31,
+             _segment(s.cd31, s.tissue, CD31_LOW, CD31_HIGH), CD31_COLOUR,
              f"{CD31_LOW}/{CD31_HIGH}"),
-            ("virus", virus,
-             _segment(virus, tissue, VIRUS_LOW, VIRUS_HIGH), VIRUS_COLOUR,
+            ("virus", s.virus,
+             _segment(s.virus, s.tissue, VIRUS_LOW, VIRUS_HIGH), VIRUS_COLOUR,
              f"{VIRUS_LOW}/{VIRUS_HIGH}"),
         ]
-        height, width = cd31.shape
+        height, width = s.cd31.shape
         fig, axes = plt.subplots(1, 2, figsize=(2 * PANEL_INCHES,
                                                 PANEL_INCHES * height / width))
         for (name, channel, mask, colour, tag), ax in zip(panels, axes):
-            _draw(ax, _clip(channel, tissue), mask, colour,
+            _draw(ax, _clip(channel, s.tissue), mask, colour,
                   f"{name} - Jerman {tag}   (area {mask.mean():.3f})")
 
-        label = f"{figure} {mouse} {REGION_NAME[region]}" + (f" s{slice_id}" if slice_id else "")
-        fig.suptitle(f"{label}  ({reporter}) - Jerman vessel contours: "
+        fig.suptitle(f"{s.label}  ({s.reporter}) - Jerman vessel contours: "
                      "CD31 ground truth (magenta), virus (green)", fontsize=13)
         fig.tight_layout(rect=(0, 0, 1, 0.98))
 
-        jpg = out / (f"{figure.replace(' ', '')}_{mouse}_{region}_{reporter}"
-                     f"_s{slice_id or '0'}.jpg")
+        jpg = out / f"{s.stem}.jpg"
         fig.savefig(jpg, dpi=DPI, bbox_inches="tight", pil_kwargs={"quality": 90})
         plt.close(fig)
-        print(f"[{index:2d}/{len(paths)}] {jpg.name}")
+        print(f"{s.counter} {jpg.name}")
 
     print(f"\nwrote Jerman contour JPGs to {out}")
 
