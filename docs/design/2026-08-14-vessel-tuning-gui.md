@@ -152,11 +152,15 @@ deliberately does not run — and must not be presented as if it did.
 This is the one piece of pipeline the generalization makes *more* important, not less.
 `max_eigenvalue`'s own docstring: run it once over a representative subset and pass the
 result to every `jerman_vesselness` call, because that "is what lets a single threshold
-mean the same thing in both channels and across slices". `vessel_utils.chunked.apply_vesselness`
-refuses to run without it. `calibrate_reference` in the spinal-cord script spells out the
-consequence of getting it wrong: computed per image, "a fixed threshold would mean a
-different thing in every section — and the comparison being made here is precisely across
-sections, regions and mice."
+mean the same thing in both channels and across slices". `calibrate_reference` in the
+spinal-cord script spells out the consequence of getting it wrong: computed per image, "a
+fixed threshold would mean a different thing in every section — and the comparison being
+made here is precisely across sections, regions and mice."
+
+(An earlier draft also cited `vessel_utils.chunked.apply_vesselness`, which refused to run
+without `reference_lambda` at all. That module was deleted in #37; the argument is
+unaffected, since `max_eigenvalue`'s docstring and `calibrate_reference` both make the same
+point and both survive.)
 
 A cross-dataset viewer must not weaken that. So:
 
@@ -266,15 +270,23 @@ Cheap now, expensive later, so it is done now:
 - No 2D-only calls in `gui.py`. `jerman_vesselness` already takes 2D or 3D, `clean_mask`
   already branches `disk`/`ball` on `ndim`, `remove_small_objects` is nD.
 
-What is left for 3D is the loader (`storage.open_volume` and level switching) and tuning
-on a crop, since a live whole-volume re-run is not physically possible. Those are
-additions, not rewrites.
+What is left for 3D is the loader and tuning on a crop, since a live whole-volume re-run is
+not physically possible. Those are additions, not rewrites.
+
+The loader is now a bigger addition than this draft assumed: it named
+`storage.open_volume` and pyramid level switching, but #37 deleted `vessel_utils/storage.py`
+along with the rest of the whole-brain layer, as uncalled. So a 3D loader means bringing
+that back — `git show 52abb9f^:vessel_utils/storage.py` — not importing it. That does not
+change the conclusion (still an addition, not a rewrite) but it does move the 3D work from
+"wire up an existing loader" to "restore the chunked-storage layer first", which is a
+different size of job and should be scoped as such. CLAUDE.md's "If whole-brain lightsheet
+work restarts" section carries the non-obvious constraints that layer has to satisfy.
 
 ### Files
 
 | File | Change |
 | --- | --- |
-| `vessel_utils/gui.py` | new, ~320 lines. Imports napari lazily so `import vessel_utils` stays cheap, matching the existing lazy re-export convention. |
+| `vessel_utils/gui.py` | new, ~320 lines. Imports napari inside the functions that need it, so `import vessel_utils.gui` stays cheap. (#36 replaced the old lazy `__getattr__` re-export with an `__init__.py` that imports *nothing*, and `test_package_init_stays_empty` now pins that — so do not add `gui` to any package-level import list.) |
 | `vessel_utils/vesselness.py` | new `reference_lambda()`, ~12 lines |
 | `pyproject.toml` | `gui = ["napari[all]"]` kept out of `dev` so the test install stays free of Qt and ~45 packages; `[project.scripts] bvp-tune = "vessel_utils.gui:main"` |
 | `scripts/analyse_spinal_cord.py` | one line: `DATA = Path(os.environ.get("BVP_DATA", r"Z:\..."))`. Separable from the GUI and worth it independently — that hardcoded share breaks all eight scripts importing from this module for any lab member without `Z:` mounted. Behaviour unchanged when unset. |
@@ -284,14 +296,26 @@ additions, not rewrites.
 means the GUI needs neither `dice_between_channels.channel_masks` nor a split of
 `analyse_spinal_cord.analyse`, both of which earlier drafts of this design called for.
 
-The tissue-mask dropdown reuses existing implementations rather than adding a fifth:
-`percentile` → `vessel_utils.correct.tissue_mask`, `grabcut` →
-`vessel_utils._vendor.compute_entropy_grabcut`, `brain` →
+The tissue-mask dropdown reuses existing implementations rather than adding a fourth:
+`grabcut` → `vessel_utils._vendor.compute_entropy_grabcut`, `brain` →
 `velazquez_rivera_2025.vessels.get_brain_mask`, plus `none`. The `brain` option is labelled
 **8-bit input** in the UI: it calls `cv2.threshold(..., THRESH_TRIANGLE)`, which does not
 accept uint16 or float, so on 16-bit microscopy it must be given a converted copy.
 Importing the frozen archive from the active package is a read-only import and does not
 touch the freeze; it beats duplicating four lines.
+
+**The `percentile` option is dropped** (this draft had four). It pointed at
+`vessel_utils.correct.tissue_mask`, which was deleted in #37 as uncalled, so keeping it
+would mean writing a fresh crude masker — the fifth implementation this paragraph exists
+to avoid, and a re-add of exactly what was just removed. `grabcut` is what the shipped
+pipeline actually uses, which is the operating point this viewer exists to tune.
+
+If `percentile` was really there for *speed* — GrabCut being the slow step in an
+interactive loop — the cheaper fix is to reuse the pipeline's existing cache rather than a
+second algorithm: `analyse_spinal_cord.tissue_mask` already content-addresses its masks by
+a blake2b of the channel sum under `results/tissue_masks/`, so a section the batch scripts
+have seen masks instantly. Recover the deleted implementation with
+`git show 52abb9f^:vessel_utils/correct.py` if this reasoning is wrong.
 
 ## Error handling
 
