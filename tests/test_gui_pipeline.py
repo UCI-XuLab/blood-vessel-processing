@@ -348,3 +348,76 @@ def test_readout_guards_a_tied_percentile_selection(slice_2d):
     st = dict(st)
     st["ref_top_q"] = st["tissue"].copy()          # 100% selected, nominal q=10
     assert gui.readout(st, SPACING_2D, q=10.0)["enrichment_q"] is None
+
+
+# --------------------------------------------------------------------------
+# presets and caching
+# --------------------------------------------------------------------------
+
+def test_presets_carry_the_documented_values():
+    shipped = gui.PRESETS["spinal-cord shipped"]
+    assert shipped["spacing"] == 0.650193
+    assert shipped["roles"] == (1, 0)
+    assert shipped["mask"] == "grabcut"
+    assert shipped["reference"] == 2.0
+    assert shipped["ref_thr"] == (0.03, 0.09)
+    assert shipped["test_thr"] == (0.04, 0.12)
+    assert shipped["plausible"] == (0.01, 0.10)
+
+    superseded = gui.PRESETS["spinal-cord superseded"]
+    assert superseded["reference"] is None            # calibrated, not fixed
+    assert superseded["ref_thr"] == (0.02, 0.15)
+    assert superseded["test_thr"] == (0.02, 0.15)
+
+    assert gui.PRESETS["generic"]["mask"] == "otsu"   # fast + dtype-agnostic
+    assert gui.PRESETS["generic"]["plausible"] == (0.0, 1.0)
+
+
+def test_brain_slice_preset_is_labelled_a_starting_point():
+    """It reproduces no published figure - those came from the archive pipeline."""
+    assert "starting point" in " ".join(gui.PRESETS).lower()
+
+
+def test_every_preset_names_a_real_mask_method():
+    for name, preset in gui.PRESETS.items():
+        assert preset["mask"] in gui.MASK_METHODS, name
+
+
+def test_load_is_cached_by_its_arguments(tmp_path):
+    stack = np.zeros((2, 32, 32), dtype=np.uint16)
+    stack[:, 8:24, 8:24] = 4000
+    path = _write(tmp_path / "pair.tif", stack)
+
+    gui.load.cache_clear()
+    first = gui.load(path, "otsu", (1, 0))
+    assert gui.load.cache_info().misses == 1
+    second = gui.load(path, "otsu", (1, 0))
+    assert gui.load.cache_info().hits == 1
+    assert first[1] is second[1]                       # same object, not a copy
+
+    gui.load(path, "none", (1, 0))                     # different method -> miss
+    assert gui.load.cache_info().misses == 2
+
+
+def test_response_is_cached_and_reference_invalidates_it(tmp_path):
+    stack = np.zeros((2, 48, 48), dtype=np.uint16)
+    stack[:, 20:28, 8:40] = 5000
+    path = _write(tmp_path / "bar.tif", stack)
+
+    gui.response.cache_clear()
+    common = (path, 0, (1.5, 3.0), (0.75, 0.75))
+    gui.response(*common, 2.0, "none", (1, 0))
+    gui.response(*common, 2.0, "none", (1, 0))
+    assert gui.response.cache_info().hits == 1
+    gui.response(*common, 5.0, "none", (1, 0))         # new reference -> miss
+    assert gui.response.cache_info().misses == 2
+
+
+def test_response_rejects_unhashable_arguments(tmp_path):
+    path = _write(tmp_path / "x.tif", np.zeros((2, 16, 16), dtype=np.uint16))
+    with pytest.raises(TypeError):
+        gui.response(path, 0, [1.5, 3.0], (0.75, 0.75), 2.0, "none", (1, 0))
+
+
+def test_selftest_passes():
+    gui.selftest()

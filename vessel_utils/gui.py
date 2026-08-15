@@ -13,6 +13,7 @@ A dataset is a PRESET - a dict of numbers plus two enum choices - never a code
 path. See docs/design/2026-08-14-vessel-tuning-gui.md.
 """
 
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -22,6 +23,7 @@ from vessel_utils.vesselness import jerman_vesselness
 
 __all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask",
            "find_images", "channel_count", "read_spacing", "read_channels", "readout",
+           "PRESETS", "load", "response", "selftest",
            "main"]
 
 
@@ -402,3 +404,90 @@ def _add_intensity_measures(out, st, q, warnings):
         out["off_target"] = float((test_positive & ~ref_vessels).sum() / positive_area)
     out["warnings"] = warnings
     return out
+
+
+SIGMAS = (1.5, 3.0, 6.0, 12.0)      # um, capillary through venule radius
+
+# A preset is numbers plus two enum choices, never a code path. `spacing=None`
+# means read the TIFF tags; `reference=None` means calibrate over a sample of the
+# loaded directory once, then leave it editable.
+PRESETS = {
+    "generic": dict(
+        spacing=None, roles=(1, 0), mask="otsu", reference=None,
+        ref_thr=(0.03, 0.09), test_thr=(0.03, 0.09), min_vessel_um2=6.0,
+        virus_k=3.0, q=10.0, plausible=(0.0, 1.0)),
+    # The operating point behind the shipped contour JPGs and handoff mask TIFs.
+    "spinal-cord shipped": dict(
+        spacing=0.650193, roles=(1, 0), mask="grabcut", reference=2.0,
+        ref_thr=(0.03, 0.09), test_thr=(0.04, 0.12), min_vessel_um2=6.0,
+        virus_k=3.0, q=10.0, plausible=(0.01, 0.10)),
+    # Superseded, and kept so its ~43%-of-tissue mask can be looked at: its
+    # calibrated reference comes out near 0.5, which saturates the Jerman response
+    # so the "vessel" mask is mostly grey matter.
+    "spinal-cord superseded": dict(
+        spacing=0.650193, roles=(1, 0), mask="grabcut", reference=None,
+        ref_thr=(0.02, 0.15), test_thr=(0.02, 0.15), min_vessel_um2=6.0,
+        virus_k=3.0, q=10.0, plausible=(0.01, 0.10)),
+    # Reproduces NO published figure - the brain-slice figures came from the
+    # archive pipeline, which this viewer deliberately does not run.
+    "brain-slice starting point": dict(
+        spacing=1.0, roles=(1, 0), mask="brain", reference=None,
+        ref_thr=(0.03, 0.09), test_thr=(0.03, 0.09), min_vessel_um2=6.0,
+        virus_k=3.0, q=10.0, plausible=(0.0, 1.0)),
+}
+
+
+@lru_cache(maxsize=8)
+def load(path, mask_method, roles):
+    """Channels and tissue mask for one file. Cached: masking is the slow step.
+
+    All arguments must be hashable - `roles` is a tuple, not a list.
+    """
+    ref, test = read_channels(path, roles)
+    channels = (ref,) if test is None else (ref, test)
+    return channels, tissue_mask(channels, mask_method)
+
+
+@lru_cache(maxsize=8)
+def response(path, role_index, sigmas, spacing, reference, mask_method, roles):
+    """Vesselness for one channel of one file, bounded in [0, 1].
+
+    This is the seconds-scale step, and the only reason the threshold sliders can
+    be live: everything downstream of it re-runs in about 100 ms. maxsize=8 holds
+    two channels across four files.
+    """
+    channels, tissue = load(path, mask_method, roles)
+    # Same computation _response_of does, keyed by (path, role) for the cache.
+    return _response_of(channels[role_index], tissue, spacing, sigmas, reference)
+
+
+def selftest():
+    """Build every layer for a phantom and check the readout against metrics.
+
+    Runs headless, so it is the check to reach for when the viewer misbehaves and
+    the question is whether the pipeline or the Qt wiring is at fault.
+    """
+    from vessel_utils import metrics
+    from vessel_utils.synth import phantom
+
+    volume, truth, _ = phantom(shape=(16, 128, 128), spacing=(3.0, 0.75, 0.75), seed=3)
+    index = int(np.argmax(truth.reshape(truth.shape[0], -1).sum(axis=1)))
+    image, spacing = volume[index].astype(np.float32), (0.75, 0.75)
+    tissue = tissue_mask([image], "none")
+    reference = reference_lambda([image], spacing, SIGMAS[:3], masks=[tissue])
+    assert reference > 0, "calibration produced a non-positive reference"
+
+    st = stages(image, image, spacing, tissue=tissue, sigmas=SIGMAS[:3],
+                reference=reference, ref_low=0.03, ref_high=0.09, test_low=0.03,
+                test_high=0.09, min_vessel_um2=6.0, virus_k=3.0, q=10.0)
+    for key in ("ref_response", "test_response", "ref_vessels", "test_vessels",
+                "test_positive", "ref_top_q", "tissue"):
+        assert st[key] is not None, f"{key} missing"
+        assert st[key].shape == image.shape, f"{key} has the wrong shape"
+    assert 0.0 <= st["ref_response"].min() <= st["ref_response"].max() <= 1.0
+
+    got = readout(st, spacing, q=10.0, plausible=(0.0, 1.0), include_cl_dice=True)
+    assert got["dice"] == metrics.dice(st["test_vessels"], st["ref_vessels"])
+    assert got["dice"] > 0.99, "identical channels must agree"
+    print(f"selftest OK - reference {reference:.3f}, "
+          f"ref_af {got['ref_af']:.4f}, dice {got['dice']:.4f}")
