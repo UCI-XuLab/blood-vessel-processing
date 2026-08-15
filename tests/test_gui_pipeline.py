@@ -196,3 +196,81 @@ def test_mask_brain_rejects_non_8bit():
     """
     with pytest.raises(ValueError, match="8-bit"):
         gui.tissue_mask([np.zeros((32, 32), dtype=np.uint16)], "brain")
+
+
+# --------------------------------------------------------------------------
+# discovery, spacing, and the channel-count guard
+# --------------------------------------------------------------------------
+
+import tifffile
+
+
+def _write(path, array, resolution=None):
+    kwargs = {"resolution": resolution, "resolutionunit": "CENTIMETER"} \
+        if resolution else {}
+    tifffile.imwrite(path, array, **kwargs)
+    return path
+
+
+def test_find_images_is_sorted_and_case_insensitive(tmp_path):
+    for name in ("b.tif", "a.TIF", "c.tiff", "notes.txt"):
+        if name.endswith(".txt"):
+            (tmp_path / name).write_text("x")
+        else:
+            _write(tmp_path / name, np.zeros((8, 8), dtype=np.uint16))
+    assert [p.name for p in gui.find_images(tmp_path)] == ["a.TIF", "b.tif", "c.tiff"]
+
+
+def test_find_images_reports_an_empty_directory(tmp_path):
+    with pytest.raises(ValueError, match="no TIFF"):
+        gui.find_images(tmp_path)
+
+
+def test_channel_count_reads_the_header(tmp_path):
+    one = _write(tmp_path / "one.tif", np.zeros((16, 16), dtype=np.uint16))
+    two = _write(tmp_path / "two.tif", np.zeros((2, 16, 16), dtype=np.uint16))
+    three = _write(tmp_path / "three.tif", np.zeros((3, 16, 16), dtype=np.uint16))
+    assert gui.channel_count(one) == 1
+    assert gui.channel_count(two) == 2
+    assert gui.channel_count(three) == 3
+
+
+def test_read_channels_returns_the_requested_roles(tmp_path):
+    stack = np.zeros((2, 16, 16), dtype=np.uint16)
+    stack[0] = 11
+    stack[1] = 22
+    path = _write(tmp_path / "pair.tif", stack)
+    ref, test = gui.read_channels(path, (1, 0))
+    assert ref[0, 0] == 22 and test[0, 0] == 11
+
+
+def test_read_channels_allows_single_channel_mode(tmp_path):
+    path = _write(tmp_path / "solo.tif", np.full((16, 16), 5, dtype=np.uint16))
+    ref, test = gui.read_channels(path, (0, None))
+    assert ref[0, 0] == 5 and test is None
+
+
+def test_read_channels_refuses_a_role_the_file_cannot_supply(tmp_path):
+    """THE guard. Never re-index, never fall back to [0]/[1]."""
+    path = _write(tmp_path / "solo.tif", np.zeros((16, 16), dtype=np.uint16))
+    with pytest.raises(ValueError, match="has 1 channel"):
+        gui.read_channels(path, (1, 0))
+
+
+def test_read_channels_refuses_an_uncurated_extra_channel_file(tmp_path):
+    """A 3-channel file with roles (1, 0) is exactly the silent-wrong-pair case."""
+    path = _write(tmp_path / "trio.tif", np.zeros((3, 16, 16), dtype=np.uint16))
+    with pytest.raises(ValueError, match="3 channels"):
+        gui.read_channels(path, (1, 0))
+
+
+def test_read_spacing_from_tags(tmp_path):
+    # 10000 px/cm == 1 um/px
+    path = _write(tmp_path / "cal.tif", np.zeros((16, 16), dtype=np.uint16),
+                  resolution=(10000, 10000))
+    assert gui.read_spacing(path) == pytest.approx((1.0, 1.0))
+
+
+def test_read_spacing_returns_none_when_absent(tmp_path):
+    path = _write(tmp_path / "raw.tif", np.zeros((16, 16), dtype=np.uint16))
+    assert gui.read_spacing(path) is None

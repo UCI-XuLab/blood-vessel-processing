@@ -13,12 +13,15 @@ A dataset is a PRESET - a dict of numbers plus two enum choices - never a code
 path. See docs/design/2026-08-14-vessel-tuning-gui.md.
 """
 
+from pathlib import Path
+
 import numpy as np
 
 from vessel_utils.threshold import segment
 from vessel_utils.vesselness import jerman_vesselness
 
-__all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask", "main"]
+__all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask",
+           "find_images", "channel_count", "read_spacing", "read_channels", "main"]
 
 
 def normalise(channel, roi):
@@ -215,3 +218,100 @@ def tissue_mask(channels, method):
                          "Convert a copy first, or use 'otsu'.")
     from velazquez_rivera_2025.vessels import get_brain_mask   # frozen; read-only
     return np.asarray(get_brain_mask(total.astype(np.uint8)), dtype=bool)
+
+
+IMAGE_SUFFIXES = (".tif", ".tiff")
+
+
+def find_images(directory):
+    """Every TIFF in a directory, sorted. Case-insensitive on the suffix."""
+    directory = Path(directory)
+    paths = sorted(p for p in directory.iterdir()
+                   if p.suffix.lower() in IMAGE_SUFFIXES)
+    if not paths:
+        raise ValueError(f"no TIFF images in {directory} "
+                         f"(looked for {', '.join(IMAGE_SUFFIXES)})")
+    return paths
+
+
+def channel_count(path):
+    """Channels, from the header, without decoding the image.
+
+    Every non-spatial axis multiplies in, rather than keying on the axis being
+    labelled "C": tifffile's own heuristic for an untagged leading dimension
+    varies by version (observed "Q" for two planes, "S"/RGB for three, on
+    tifffile 2026.7.31), so a literal `axes.startswith("C")` silently reads 1
+    channel for exactly the multi-channel files this guard exists to catch.
+    """
+    import tifffile
+    with tifffile.TiffFile(path) as handle:
+        series = handle.series[0]
+        count = 1
+        for axis, size in zip(series.axes, series.shape):
+            if axis not in ("Y", "X"):
+                count *= int(size)
+        return count
+
+
+def read_spacing(path, ndim=2):
+    """Physical pixel size in micrometres from the TIFF tags, or None.
+
+    Returned as a per-axis tuple, never a scalar, so the same call works for a
+    volume. None means the file does not say - and the caller must surface that
+    rather than assume 1.0: with sigmas in micrometres, a wrong spacing silently
+    searches the wrong vessel calibres.
+    """
+    import tifffile
+    # TIFF ResolutionUnit: 1 = none, 2 = inch, 3 = centimetre. Value is the length
+    # of one unit in micrometres, so um/px = unit_um / (pixels-per-unit).
+    to_um = {1: None, 2: 25400.0, 3: 10000.0}
+    with tifffile.TiffFile(path) as handle:
+        page = handle.pages[0]
+        tags = page.tags
+        if "XResolution" not in tags or "YResolution" not in tags:
+            return None
+        unit = tags["ResolutionUnit"].value if "ResolutionUnit" in tags else 2
+        scale = to_um.get(int(unit))
+        if scale is None:
+            return None
+        out = []
+        for name in ("YResolution", "XResolution"):
+            numerator, denominator = tags[name].value
+            if not numerator:
+                return None
+            out.append(scale * denominator / numerator)
+    return tuple(out[-ndim:]) if ndim <= 2 else (out[0],) * (ndim - 2) + tuple(out)
+
+
+def read_channels(path, roles):
+    """The reference and test channels named by `roles`, as float32.
+
+    `roles` is `(reference_index, test_index)`; `test_index` may be None for
+    single-channel work.
+
+    Raises rather than re-indexing when the file cannot supply a role. This is
+    deliberate and load-bearing: `scripts/analyse_spinal_cord.curated_paths`
+    excludes files with more than two channels outright rather than taking the
+    first two, because "the extra-channel files have not been curated yet, so
+    which two are green and CD31 is not established, and guessing would silently
+    compare the wrong pair". Falling back to [0]/[1] here would produce a
+    confident, wrong Dice instead of a visible error.
+    """
+    import tifffile
+    count = channel_count(path)
+    wanted = [i for i in roles if i is not None]
+    # count > 2 outright, matching curated_paths: a file with an extra,
+    # uncurated channel is refused even when the requested indices are in
+    # range, because which two of three-plus are reference/test is not
+    # guessable from the header.
+    if count > 2 or any(i >= count for i in wanted):
+        plural = "channel" if count == 1 else "channels"
+        raise ValueError(
+            f"{Path(path).name} has {count} {plural}, so role indices {tuple(wanted)} "
+            f"cannot be read. Channel layout is not guessable - pick indices this "
+            f"file actually has, or exclude it.")
+
+    stack = tifffile.imread(path)
+    def plane(index):
+        return np.asarray(stack if count == 1 else stack[index], dtype=np.float32)
+    return plane(roles[0]), (None if roles[1] is None else plane(roles[1]))
