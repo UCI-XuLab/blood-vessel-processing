@@ -24,7 +24,7 @@ from vessel_utils.vesselness import jerman_vesselness
 __all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask",
            "find_images", "channel_count", "read_spacing", "read_channels", "readout",
            "PRESETS", "load", "response", "selftest",
-           "main"]
+           "LAYERS", "build_viewer", "main"]
 
 
 def normalise(channel, roi):
@@ -491,3 +491,254 @@ def selftest():
     assert got["dice"] > 0.99, "identical channels must agree"
     print(f"selftest OK - reference {reference:.3f}, "
           f"ref_af {got['ref_af']:.4f}, dice {got['dice']:.4f}")
+
+
+# ---------------------------------------------------------------------------
+# The interactive half. napari and magicgui are imported inside the functions
+# below, never at module top level, so `import vessel_utils.gui` stays free of
+# Qt and the pure half above tests without a display server.
+# ---------------------------------------------------------------------------
+
+LAYERS = [
+    # (stage key, layer name, kind, visible, colormap)
+    ("ref_image",     "reference", "image",  True,  "magenta"),
+    ("test_image",    "test",      "image",  True,  "green"),
+    ("ref_response",  "reference vesselness", "image", False, "turbo"),
+    ("test_response", "test vesselness",      "image", False, "turbo"),
+    ("tissue",        "tissue",    "labels", False, None),
+    ("ref_vessels",   "reference vessels", "labels", True,  None),
+    ("test_vessels",  "test vessels",      "labels", True,  None),
+    ("test_positive", "test+ (intensity)", "labels", False, None),
+    ("ref_top_q",     "reference top-q%",  "labels", False, None),
+]
+
+
+def _spacing_tuple(value, ndim=2):
+    return (float(value),) * ndim if np.isscalar(value) else tuple(value)
+
+
+def run_all(viewer, state, panel, preset):
+    """Batch every file to a CSV. Placeholder until Task 8 wires the real one."""
+    # ponytail: Task 8 replaces this stub with the actual batch-to-CSV run.
+    print("batch not yet wired")
+
+
+def build_viewer(directory, preset_name="generic", show=True):
+    """Open the viewer on a directory of images. Returns the napari Viewer.
+
+    `show=False` builds the viewer without showing the window - the only way to
+    construct it headlessly, since Qt's `offscreen` platform cannot create an
+    OpenGL context on Windows and vispy/napari require one. The real launch
+    (`main`) uses the default `show=True`.
+    """
+    import napari
+    from magicgui import magicgui
+
+    paths = find_images(directory)
+    preset = dict(PRESETS[preset_name])
+    state = {"paths": paths, "preset": preset_name, "reference": preset["reference"],
+             "spacing": None, "stages": None}
+    viewer = napari.Viewer(title=f"bvp-tune - {Path(directory).name}", show=show)
+
+    def labelled(path):
+        """Combobox label, flagging files the current roles cannot be read from."""
+        try:
+            count = channel_count(path)
+        except Exception:                                   # noqa: BLE001
+            return f"{path.name}  [unreadable]"
+        wanted = [i for i in preset["roles"] if i is not None]
+        bad = " [channels: %d - roles %s unavailable]" % (count, tuple(wanted)) \
+            if (count > 2 or any(i >= count for i in wanted)) else ""
+        return f"{path.name}{bad}"
+
+    def resolve_spacing(path):
+        if preset["spacing"] is not None:
+            return _spacing_tuple(preset["spacing"])
+        from_tags = read_spacing(path)
+        if from_tags is None:
+            state["spacing_unknown"] = True
+            return (1.0, 1.0)
+        state["spacing_unknown"] = False
+        return from_tags
+
+    def calibrate(spacing, sigmas, mask_method, roles, sample=6):
+        """One reference_lambda for the whole directory, never per image."""
+        step = max(1, len(paths) // sample)
+        images, masks = [], []
+        for path in paths[::step][:sample]:
+            try:
+                channels, tissue = load(path, mask_method, roles)
+            except Exception as error:                      # noqa: BLE001
+                print(f"  calibration skipped {path.name}: {error}")
+                continue
+            images.append(channels[0])
+            masks.append(tissue)
+        if not images:
+            raise ValueError("no image in the calibration sample had usable tissue")
+        return reference_lambda(images, spacing, sigmas, masks=masks)
+
+    @magicgui(
+        auto_call=True,
+        call_button="Recompute (spacing / sigmas / reference)",
+        file={"choices": paths, "label": "file"},
+        mask={"choices": MASK_METHODS, "label": "tissue mask"},
+        sigmas={"label": "sigmas (um)"},
+        reference={"label": "reference_lambda", "step": 0.05},
+        ref_low={"widget_type": "FloatSlider", "min": 0.0, "max": 1.0, "step": 0.005},
+        ref_high={"widget_type": "FloatSlider", "min": 0.0, "max": 1.0, "step": 0.005},
+        test_low={"widget_type": "FloatSlider", "min": 0.0, "max": 1.0, "step": 0.005},
+        test_high={"widget_type": "FloatSlider", "min": 0.0, "max": 1.0, "step": 0.005},
+        virus_k={"widget_type": "FloatSlider", "min": 0.0, "max": 10.0, "step": 0.1},
+        q={"widget_type": "FloatSlider", "min": 0.5, "max": 50.0, "step": 0.5},
+    )
+    def panel(file: Path = paths[0],
+              mask: str = preset["mask"],
+              sigmas: str = ", ".join(str(s) for s in SIGMAS),
+              reference: float = float(preset["reference"] or 0.0),
+              ref_low: float = preset["ref_thr"][0],
+              ref_high: float = preset["ref_thr"][1],
+              test_low: float = preset["test_thr"][0],
+              test_high: float = preset["test_thr"][1],
+              min_vessel_um2: float = preset["min_vessel_um2"],
+              virus_k: float = preset["virus_k"],
+              q: float = preset["q"],
+              cl_dice: bool = False):
+        refresh(locals())
+
+    def refresh(values):
+        roles = preset["roles"]
+        spacing = resolve_spacing(values["file"])
+        sigmas = tuple(float(s) for s in values["sigmas"].replace(",", " ").split())
+        reference = values["reference"] or None
+        try:
+            if reference is None:
+                reference = calibrate(spacing, sigmas, values["mask"], roles)
+                panel.reference.value = reference
+            channels, tissue = load(values["file"], values["mask"], roles)
+            # Compute the vesselness through the cache, so a threshold-only change
+            # is a cache hit (instant) and stages re-thresholds in ~0.3s rather
+            # than recomputing the ~8s filter. sigmas/reference changes miss the
+            # cache by construction, which is why they sit behind Recompute.
+            ref_response = response(values["file"], 0, sigmas, spacing, reference,
+                                    values["mask"], roles)
+            test_response = (response(values["file"], 1, sigmas, spacing, reference,
+                                      values["mask"], roles)
+                             if len(channels) > 1 else None)
+            st = stages(channels[0], channels[1] if len(channels) > 1 else None,
+                        spacing, tissue=tissue, sigmas=sigmas, reference=reference,
+                        ref_low=values["ref_low"], ref_high=values["ref_high"],
+                        test_low=values["test_low"], test_high=values["test_high"],
+                        min_vessel_um2=values["min_vessel_um2"],
+                        virus_k=values["virus_k"], q=values["q"],
+                        ref_response=ref_response, test_response=test_response)
+        except Exception as error:                          # noqa: BLE001
+            # Leave the previous layers up. Selecting a bad file must not blank
+            # the display - the batch scripts print SKIP and carry on, same idea.
+            report.value = f"{Path(values['file']).name}\n\nFAILED: {error}"
+            return
+
+        st = dict(st, ref_image=channels[0],
+                  test_image=channels[1] if len(channels) > 1 else None)
+        draw(st, spacing)
+        numbers = readout(st, spacing, q=values["q"], plausible=preset["plausible"],
+                          include_cl_dice=values["cl_dice"])
+        report.value = format_report(values["file"], spacing, reference, numbers)
+        state["stages"] = st
+
+    def draw(st, spacing):
+        for key, name, kind, visible, colormap in LAYERS:
+            data = st.get(key)
+            if data is None:
+                if name in viewer.layers:
+                    viewer.layers.remove(name)
+                continue
+            if name in viewer.layers:
+                viewer.layers[name].data = data
+                if "response" in key:
+                    # Re-pin on every update: the response window must stay 0-1
+                    # so Jerman saturation stays visible, never rescaled to data.
+                    viewer.layers[name].contrast_limits = (0.0, 1.0)
+                continue
+            if kind == "image":
+                # Response clims are PINNED to 0-1, never auto-scaled: Jerman
+                # saturates above tau*reference_lambda/2, and auto-scaling would
+                # hide exactly that.
+                extra = {"contrast_limits": (0.0, 1.0)} if "response" in key else {}
+                viewer.add_image(data, name=name, colormap=colormap,
+                                 blending="additive", scale=spacing, **extra)
+            else:
+                viewer.add_labels(np.asarray(data, dtype=np.uint8), name=name,
+                                  opacity=0.4, scale=spacing)
+            viewer.layers[name].visible = visible
+
+    def format_report(path, spacing, reference, numbers):
+        lines = [str(Path(path).name),
+                 f"spacing {spacing[0]:.4g} x {spacing[1]:.4g} um/px"
+                 + ("  (NOT in the file - assumed)"
+                    if state.get("spacing_unknown") else ""),
+                 f"reference_lambda {reference:.4g}", ""]
+        for key in ("ref_af", "test_af", "dice", "jaccard", "precision", "recall",
+                    "cl_dice", "enrichment", "coverage", "off_target",
+                    "enrichment_q", "cut"):
+            value = numbers.get(key)
+            lines.append(f"{key:14s} " + ("-" if value is None else f"{value:.4f}"))
+        for warning in numbers["warnings"]:
+            lines.append(f"\n! {warning}")
+        return "\n".join(lines)
+
+    from magicgui.widgets import Label, PushButton, TextEdit
+    report = TextEdit(value="", label="")
+    report.read_only = True
+    batch = PushButton(text=f"Run all {len(paths)} -> CSV")
+    batch.changed.connect(lambda: run_all(viewer, state, panel, preset))
+
+    viewer.window.add_dock_widget(
+        Label(value=f"<b>preset:</b> {preset_name}"), area="right", name="preset")
+    viewer.window.add_dock_widget(panel, area="right", name="parameters")
+    viewer.window.add_dock_widget(report, area="right", name="metrics")
+    viewer.window.add_dock_widget(batch, area="right", name="batch")
+    panel.file.choices = paths
+    try:
+        # Best-effort: reach through magicgui to Qt to hang a per-file tooltip on
+        # the combobox. The load-bearing channel guard is read_channels raising;
+        # this only annotates. Private path, so tolerate its absence.
+        panel.file._widget._qwidget.setToolTip("\n".join(labelled(p) for p in paths))
+    except Exception:                                       # noqa: BLE001
+        pass
+    refresh({name: panel[name].value for name in panel.__signature__.parameters})
+    return viewer
+
+
+def main(argv=None):
+    """`bvp-tune [directory] [--preset NAME] [--selftest]`."""
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="bvp-tune", description="Interactive vessel-segmentation tuning viewer")
+    parser.add_argument("directory", nargs="?", help="directory of TIFF images")
+    parser.add_argument("--preset", default="generic", choices=sorted(PRESETS))
+    parser.add_argument("--selftest", action="store_true",
+                        help="run the headless pipeline check and exit")
+    args = parser.parse_args(argv)
+
+    if args.selftest:
+        selftest()
+        return 0
+    if not args.directory:
+        parser.error("a directory is required (or use --selftest)")
+
+    try:
+        import napari
+    except ImportError:
+        print('napari is not installed. Run:  pip install -e ".[gui]"')
+        return 1
+    try:
+        build_viewer(args.directory, args.preset)
+    except ValueError as error:
+        print(f"error: {error}")
+        return 1
+    napari.run()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
