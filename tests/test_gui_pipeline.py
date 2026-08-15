@@ -139,3 +139,60 @@ def test_reference_lambda_survives_a_duplicated_image(three_slices):
 def test_reference_lambda_rejects_an_empty_sample():
     with pytest.raises(ValueError, match="no images"):
         gui.reference_lambda([], (0.75, 0.75), (1.5, 3.0))
+
+
+# --------------------------------------------------------------------------
+# tissue_mask dispatch
+# --------------------------------------------------------------------------
+
+def test_mask_methods_are_the_documented_four():
+    assert gui.MASK_METHODS == ("none", "otsu", "grabcut", "brain")
+
+
+def test_mask_none_is_everything(slice_2d):
+    image, _, _ = slice_2d
+    mask = gui.tissue_mask([image], "none")
+    assert mask.dtype == bool
+    assert mask.all()
+
+
+def test_mask_otsu_separates_signal_from_background():
+    """A bright square on a dark field: Otsu must find the square, not the field."""
+    image = np.full((64, 64), 10.0, dtype=np.float32)
+    image[16:48, 16:48] = 200.0
+    mask = gui.tissue_mask([image], "otsu")
+    assert mask[16:48, 16:48].all()
+    assert not mask[:8, :8].any()
+
+
+def test_mask_otsu_works_on_uint16():
+    """dtype-agnostic is the whole reason otsu is the generic default."""
+    image = np.full((64, 64), 10, dtype=np.uint16)
+    image[16:48, 16:48] = 40000
+    assert gui.tissue_mask([image], "otsu")[16:48, 16:48].all()
+
+
+def test_mask_sums_the_channels():
+    """Tissue is whatever is bright in EITHER channel."""
+    a = np.zeros((64, 64), dtype=np.float32)
+    b = np.zeros((64, 64), dtype=np.float32)
+    a[8:24, 8:24] = 500.0
+    b[40:56, 40:56] = 500.0
+    mask = gui.tissue_mask([a, b], "otsu")
+    assert mask[8:24, 8:24].all() and mask[40:56, 40:56].all()
+
+
+def test_mask_rejects_an_unknown_method(slice_2d):
+    image, _, _ = slice_2d
+    with pytest.raises(ValueError, match="unknown tissue-mask method"):
+        gui.tissue_mask([image], "magic")
+
+
+def test_mask_brain_rejects_non_8bit():
+    """get_brain_mask calls cv2 THRESH_TRIANGLE, which is 8-bit only.
+
+    Refusing beats a cv2 error from four frames down, and beats silently
+    converting - a converted copy is the caller's decision, not ours.
+    """
+    with pytest.raises(ValueError, match="8-bit"):
+        gui.tissue_mask([np.zeros((32, 32), dtype=np.uint16)], "brain")

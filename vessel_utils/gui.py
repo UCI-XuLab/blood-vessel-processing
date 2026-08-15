@@ -18,7 +18,7 @@ import numpy as np
 from vessel_utils.threshold import segment
 from vessel_utils.vesselness import jerman_vesselness
 
-__all__ = ["normalise", "reference_lambda", "stages", "main"]
+__all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask", "main"]
 
 
 def normalise(channel, roi):
@@ -163,3 +163,55 @@ def stages(ref, test, spacing, *, tissue, sigmas, reference, ref_low, ref_high,
     else:
         out["test_positive"] = np.zeros_like(tissue)
     return out
+
+
+MASK_METHODS = ("none", "otsu", "grabcut", "brain")
+
+
+def tissue_mask(channels, method):
+    """Tissue silhouette, by one of four existing maskers.
+
+    Runs on the channel sum: tissue is whatever is bright in *either* channel, so
+    a region dim in one still masks.
+
+    none     everything. For an image that is already cropped to tissue.
+    otsu     `threshold.otsu_threshold`. Fast and dtype-agnostic, so it is the
+             default for an unknown dataset - GrabCut at 7-15 s per image would
+             stall every step through a file list with no warm cache.
+    grabcut  the vendored entropy-guided GrabCut. Slow but hugs the true edge,
+             keeps torn fragments, and rejects background haze via a local-entropy
+             seed. This is what produced the shipped spinal-cord segmentations.
+    brain    the archive's Triangle threshold. 8-BIT ONLY - cv2.threshold does not
+             accept uint16 or float.
+    """
+    if method not in MASK_METHODS:
+        raise ValueError(f"unknown tissue-mask method {method!r}; "
+                         f"expected one of {MASK_METHODS}")
+    total = np.zeros(np.shape(channels[0]), dtype=np.float32)
+    for channel in channels:
+        total += np.asarray(channel, dtype=np.float32)
+
+    if method == "none":
+        return np.ones(total.shape, dtype=bool)
+
+    if method == "otsu":
+        from vessel_utils.threshold import otsu_threshold
+        return total > otsu_threshold(total)
+
+    if method == "grabcut":
+        # Vendored from UCI-XuLab-RegTools; do not edit it here.
+        from vessel_utils._vendor import EntropyGrabCutConfig, compute_entropy_grabcut
+        mask = compute_entropy_grabcut(np.ascontiguousarray(total), polarity="bright",
+                                       config=EntropyGrabCutConfig()).mask
+        if not mask.any():
+            raise ValueError("empty tissue mask: GrabCut found no foreground "
+                             "(near-blank image)")
+        return np.asarray(mask, dtype=bool)
+
+    # brain
+    if any(np.asarray(c).dtype != np.uint8 for c in channels):
+        raise ValueError("the 'brain' mask needs 8-bit input: it calls cv2 "
+                         "THRESH_TRIANGLE, which rejects uint16 and float. "
+                         "Convert a copy first, or use 'otsu'.")
+    from velazquez_rivera_2025.vessels import get_brain_mask   # frozen; read-only
+    return np.asarray(get_brain_mask(total.astype(np.uint8)), dtype=bool)
