@@ -537,7 +537,7 @@ def build_viewer(directory, preset_name="generic", show=True):
     paths = find_images(directory)
     preset = dict(PRESETS[preset_name])
     state = {"paths": paths, "preset": preset_name, "reference": preset["reference"],
-             "spacing": None, "stages": None}
+             "spacing": None, "stages": None, "committed": None}
     viewer = napari.Viewer(title=f"bvp-tune - {Path(directory).name}", show=show)
 
     def labelled(path):
@@ -578,8 +578,12 @@ def build_viewer(directory, preset_name="generic", show=True):
         return reference_lambda(images, spacing, sigmas, masks=masks)
 
     @magicgui(
-        auto_call=True,
-        call_button="Recompute (spacing / sigmas / reference)",
+        # auto_call=False, so the call button is the ONLY thing that recomputes
+        # the expensive params (mask / sigmas / reference). Cheap widgets are
+        # wired to refresh_live below and fire on change; a threshold drag must
+        # not pay the ~8s Jerman filter.
+        auto_call=False,
+        call_button="Recompute (mask / sigmas / reference)",
         file={"choices": paths, "label": "file"},
         mask={"choices": MASK_METHODS, "label": "tissue mask"},
         sigmas={"label": "sigmas (um)"},
@@ -603,26 +607,63 @@ def build_viewer(directory, preset_name="generic", show=True):
               virus_k: float = preset["virus_k"],
               q: float = preset["q"],
               cl_dice: bool = False):
-        refresh(locals())
+        # The call button (Recompute) is the only caller: commit the expensive
+        # params, then redraw. Cheap widgets bypass this via refresh_live.
+        commit()
+
+    def commit():
+        """Copy the live mask/sigmas/reference into state['committed'], then draw.
+
+        This is the expensive path, gated behind the Recompute button. reference
+        is calibrated once here when left blank, and the result written back to
+        the widget for display and further editing (which only takes effect on
+        the next Recompute). A bad sigmas string or a failed calibration is
+        caught and shown in the readout, leaving the previous layers up.
+        """
+        try:
+            sigmas = tuple(float(s) for s in
+                           panel.sigmas.value.replace(",", " ").split())
+            mask = panel.mask.value
+            reference = panel.reference.value or None
+            spacing = resolve_spacing(panel.file.value)
+            if reference is None:
+                reference = calibrate(spacing, sigmas, mask, preset["roles"])
+                panel.reference.value = reference
+        except Exception as error:                          # noqa: BLE001
+            report.value = f"{Path(panel.file.value).name}\n\nFAILED: {error}"
+            return
+        state["committed"] = {"sigmas": sigmas, "reference": reference, "mask": mask}
+        refresh_live()
+
+    def refresh_live(*_):
+        """Redraw from the CURRENT cheap widgets but the COMMITTED expensive ones.
+
+        Reading the committed sigmas/reference/mask (never the live widgets) is
+        what keeps a threshold drag an lru_cache hit on response(): same args,
+        so the ~8s filter is not paid again, only the ~0.3s re-threshold.
+        """
+        if state.get("committed") is None:
+            return
+        refresh({name: panel[name].value for name in panel.__signature__.parameters})
 
     def refresh(values):
         roles = preset["roles"]
-        spacing = resolve_spacing(values["file"])
-        sigmas = tuple(float(s) for s in values["sigmas"].replace(",", " ").split())
-        reference = values["reference"] or None
+        sigmas = state["committed"]["sigmas"]
+        reference = state["committed"]["reference"]
+        mask = state["committed"]["mask"]
         try:
-            if reference is None:
-                reference = calibrate(spacing, sigmas, values["mask"], roles)
-                panel.reference.value = reference
-            channels, tissue = load(values["file"], values["mask"], roles)
+            # resolve_spacing opens the file, so a corrupt header must be caught
+            # here too - selecting a bad file must show FAILED, not propagate.
+            spacing = resolve_spacing(values["file"])
+            channels, tissue = load(values["file"], mask, roles)
             # Compute the vesselness through the cache, so a threshold-only change
             # is a cache hit (instant) and stages re-thresholds in ~0.3s rather
-            # than recomputing the ~8s filter. sigmas/reference changes miss the
-            # cache by construction, which is why they sit behind Recompute.
+            # than recomputing the ~8s filter. Committed sigmas/reference/mask are
+            # used so the cache key is stable across threshold drags.
             ref_response = response(values["file"], 0, sigmas, spacing, reference,
-                                    values["mask"], roles)
+                                    mask, roles)
             test_response = (response(values["file"], 1, sigmas, spacing, reference,
-                                      values["mask"], roles)
+                                      mask, roles)
                              if len(channels) > 1 else None)
             st = stages(channels[0], channels[1] if len(channels) > 1 else None,
                         spacing, tissue=tissue, sigmas=sigmas, reference=reference,
@@ -705,7 +746,14 @@ def build_viewer(directory, preset_name="generic", show=True):
         panel.file._widget._qwidget.setToolTip("\n".join(labelled(p) for p in paths))
     except Exception:                                       # noqa: BLE001
         pass
-    refresh({name: panel[name].value for name in panel.__signature__.parameters})
+
+    commit()    # initial calibrate + commit + draw, before any widget is live
+    # Wire the CHEAP widgets to refresh live. The expensive three (mask, sigmas,
+    # reference) are deliberately NOT here: they take effect only via Recompute,
+    # so editing them never triggers the ~8s filter until the user commits.
+    for name in ("file", "ref_low", "ref_high", "test_low", "test_high",
+                 "min_vessel_um2", "virus_k", "q", "cl_dice"):
+        panel[name].changed.connect(refresh_live)
     return viewer
 
 
@@ -733,7 +781,9 @@ def main(argv=None):
         return 1
     try:
         build_viewer(args.directory, args.preset)
-    except ValueError as error:
+    except (ValueError, OSError) as error:
+        # OSError covers a missing dir (FileNotFoundError) or a file passed as a
+        # dir (NotADirectoryError) from find_images/Path.iterdir.
         print(f"error: {error}")
         return 1
     napari.run()
