@@ -127,9 +127,10 @@ def stages(ref, test, spacing, *, tissue, sigmas, reference, ref_low, ref_high,
            ref_response=None, test_response=None):
     """Every intermediate array, so a viewer can show them all as layers.
 
-    `test` may be None for single-channel input, in which case every `test_*` and
-    `cut` entry is None. `reference` is the dataset-wide `reference_lambda` and is
-    never None here - resolve it before calling.
+    `test` may be None for single-channel input, in which case `test_response`,
+    `test_vessels`, `test_positive` and `cut` are None and `test_intensity` is
+    absent. `reference` is the dataset-wide `reference_lambda` and is never None
+    here - resolve it before calling.
 
     `ref_response`/`test_response` let a caller inject an already-computed (and
     cached) vesselness so a threshold change re-thresholds without paying for the
@@ -332,7 +333,7 @@ def _ratio(values_in, values_out):
     return None if outside == 0 else float(values_in.mean() / outside)
 
 
-def readout(st, spacing, *, q, plausible=(0.0, 1.0), include_cl_dice=False):
+def readout(st, *, q, plausible=(0.0, 1.0), include_cl_dice=False):
     """The numbers that go beside the picture.
 
     Argument order for the asymmetric metrics is fixed: `precision(test, ref)`
@@ -486,7 +487,7 @@ def selftest():
         assert st[key].shape == image.shape, f"{key} has the wrong shape"
     assert 0.0 <= st["ref_response"].min() <= st["ref_response"].max() <= 1.0
 
-    got = readout(st, spacing, q=10.0, plausible=(0.0, 1.0), include_cl_dice=True)
+    got = readout(st, q=10.0, plausible=(0.0, 1.0), include_cl_dice=True)
     assert got["dice"] == metrics.dice(st["test_vessels"], st["ref_vessels"])
     assert got["dice"] > 0.99, "identical channels must agree"
     print(f"selftest OK - reference {reference:.3f}, "
@@ -510,7 +511,7 @@ def batch_rows(paths, preset, params):
                         test_high=params["test_high"],
                         min_vessel_um2=params["min_vessel_um2"],
                         virus_k=params["virus_k"], q=params["q"])
-            numbers = readout(st, params["spacing"], q=params["q"],
+            numbers = readout(st, q=params["q"],
                               plausible=preset["plausible"],
                               include_cl_dice=params["cl_dice"])
         except Exception as error:                          # noqa: BLE001
@@ -563,7 +564,7 @@ def _spacing_tuple(value, ndim=2):
     return (float(value),) * ndim if np.isscalar(value) else tuple(value)
 
 
-def run_all(viewer, state, panel, preset):
+def run_all(viewer, state, panel, preset, report):
     """The Run-all button: batch every file at the parameters currently on screen.
 
     mask/sigmas/reference come from `state["committed"]` - what the displayed
@@ -571,10 +572,21 @@ def run_all(viewer, state, panel, preset):
     been edited since the last Recompute and not yet paid for. The threshold and
     percentile params are cheap and live-wired, so those are read straight off
     the panel: that is the whole point of a slider.
+
+    Every outcome is routed to `report.value` (as well as the console) so a
+    headless-Qt slot failure is visible in the window, not swallowed. The CSV
+    goes to `<dir>/../results/`, never into the source image directory, which on
+    the lab share is read-only and curated. The whole file text is built in
+    memory and written in a single `open`, wrapped in try/except: a read-only
+    results dir raises before anything is written, so there is no partial CSV.
     """
+    def say(message):
+        print(message)
+        report.value = message
+
     committed = state.get("committed")
     if committed is None:
-        print("nothing committed yet - press Recompute first")
+        say("nothing committed yet - press Recompute first")
         return
     params = dict(committed)                            # sigmas, reference, mask
     for name in ("ref_low", "ref_high", "test_low", "test_high",
@@ -586,20 +598,36 @@ def run_all(viewer, state, panel, preset):
     params["spacing"] = state["spacing"]
 
     rows, failures = batch_rows(state["paths"], preset, params)
+    skip_lines = [f"  SKIP {failure}" for failure in failures]
+    for line in skip_lines:
+        print(line)
+    # Truncate the skip list in the readout; the console has the full list.
+    shown = skip_lines[:20]
+    if len(skip_lines) > 20:
+        shown.append(f"  ... and {len(skip_lines) - 20} more")
+
     if not rows:
-        print("no file produced a row; nothing written")
-        for failure in failures:
-            print(f"  SKIP {failure}")
+        say("\n".join([f"no rows written ({len(failures)} skipped)"] + shown))
         return
-    import csv
-    out = batch_csv_path(Path(state["paths"][0]).parent, state["preset"])
-    with open(out, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+
+    try:
+        import csv
+        import io
+        results_dir = Path(state["paths"][0]).parent.parent / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
+        out = batch_csv_path(results_dir, state["preset"])
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    print(f"wrote {out}  ({len(rows)} rows, {len(failures)} skipped)")
-    for failure in failures:
-        print(f"  SKIP {failure}")
+        with open(out, "w", newline="", encoding="utf-8") as handle:
+            handle.write(buffer.getvalue())
+    except Exception as error:                          # noqa: BLE001
+        say(f"Run-all FAILED: {error}")
+        return
+
+    say("\n".join([f"wrote {out}  ({len(rows)} rows, {len(failures)} skipped)"]
+                  + shown))
 
 
 def build_viewer(directory, preset_name="generic", show=True):
@@ -615,7 +643,7 @@ def build_viewer(directory, preset_name="generic", show=True):
 
     paths = find_images(directory)
     preset = dict(PRESETS[preset_name])
-    state = {"paths": paths, "preset": preset_name, "reference": preset["reference"],
+    state = {"paths": paths, "preset": preset_name,
              "spacing": None, "stages": None, "committed": None}
     viewer = napari.Viewer(title=f"bvp-tune - {Path(directory).name}", show=show)
 
@@ -721,7 +749,11 @@ def build_viewer(directory, preset_name="generic", show=True):
         what keeps a threshold drag an lru_cache hit on response(): same args,
         so the ~8s filter is not paid again, only the ~0.3s re-threshold.
         """
-        if state.get("committed") is None:
+        # During a preset switch, the cheap widgets are reset one at a time and
+        # each fires this. Early-return so no recompute runs against a half-set
+        # panel or a committed state that belongs to the previous preset; the
+        # switch handler calls commit() once at the end instead.
+        if state.get("switching") or state.get("committed") is None:
             return
         refresh({name: panel[name].value for name in panel.__signature__.parameters})
 
@@ -761,7 +793,7 @@ def build_viewer(directory, preset_name="generic", show=True):
         st = dict(st, ref_image=channels[0],
                   test_image=channels[1] if len(channels) > 1 else None)
         draw(st, spacing)
-        numbers = readout(st, spacing, q=values["q"], plausible=preset["plausible"],
+        numbers = readout(st, q=values["q"], plausible=preset["plausible"],
                           include_cl_dice=values["cl_dice"])
         report.value = format_report(values["file"], spacing, reference, numbers)
         state["stages"] = st
@@ -807,14 +839,49 @@ def build_viewer(directory, preset_name="generic", show=True):
             lines.append(f"\n! {warning}")
         return "\n".join(lines)
 
-    from magicgui.widgets import Label, PushButton, TextEdit
+    from magicgui.widgets import ComboBox, PushButton, TextEdit
     report = TextEdit(value="", label="")
     report.read_only = True
     batch = PushButton(text=f"Run all {len(paths)} -> CSV")
-    batch.changed.connect(lambda: run_all(viewer, state, panel, preset))
+    batch.changed.connect(lambda: run_all(viewer, state, panel, preset, report))
 
-    viewer.window.add_dock_widget(
-        Label(value=f"<b>preset:</b> {preset_name}"), area="right", name="preset")
+    preset_combo = ComboBox(choices=sorted(PRESETS), value=preset_name,
+                            label="preset")
+
+    def switch_preset(*_):
+        """Change operating point in-session: reassign `preset`, reset the panel.
+
+        `preset` is a build_viewer local that commit/refresh/labelled/draw all
+        close over, so `nonlocal` makes the new dict reach them - and the readout
+        plausible band and channel roles follow it automatically. The cheap
+        widgets are live-wired, so writing their new values would fire a storm of
+        partial refreshes against the OLD committed state; state["switching"]
+        makes refresh_live early-return through the whole reset, and commit() runs
+        exactly once at the end - recalibrating reference if the new preset left
+        it blank, and drawing.
+        """
+        nonlocal preset
+        new_name = preset_combo.value
+        preset = dict(PRESETS[new_name])
+        state["preset"] = new_name
+        state["switching"] = True
+        try:
+            panel.mask.value = preset["mask"]
+            panel.sigmas.value = ", ".join(str(s) for s in SIGMAS)
+            panel.reference.value = float(preset["reference"] or 0.0)
+            panel.ref_low.value = preset["ref_thr"][0]
+            panel.ref_high.value = preset["ref_thr"][1]
+            panel.test_low.value = preset["test_thr"][0]
+            panel.test_high.value = preset["test_thr"][1]
+            panel.min_vessel_um2.value = preset["min_vessel_um2"]
+            panel.virus_k.value = preset["virus_k"]
+            panel.q.value = preset["q"]
+            state["committed"] = None
+        finally:
+            state["switching"] = False
+        commit()
+
+    viewer.window.add_dock_widget(preset_combo, area="right", name="preset")
     viewer.window.add_dock_widget(panel, area="right", name="parameters")
     viewer.window.add_dock_widget(report, area="right", name="metrics")
     viewer.window.add_dock_widget(batch, area="right", name="batch")
@@ -834,6 +901,9 @@ def build_viewer(directory, preset_name="generic", show=True):
     for name in ("file", "ref_low", "ref_high", "test_low", "test_high",
                  "min_vessel_um2", "virus_k", "q", "cl_dice"):
         panel[name].changed.connect(refresh_live)
+    # Connected only after the initial commit, so setting the box's value at
+    # construction did not fire the handler on a not-yet-built viewer.
+    preset_combo.changed.connect(switch_preset)
     return viewer
 
 

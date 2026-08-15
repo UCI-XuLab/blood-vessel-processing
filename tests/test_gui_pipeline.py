@@ -294,7 +294,7 @@ def _stages_for_readout(slice_2d, **overrides):
 def test_readout_matches_direct_metric_calls(slice_2d):
     from vessel_utils import metrics
     st, _ = _stages_for_readout(slice_2d)
-    got = gui.readout(st, SPACING_2D, q=10.0)
+    got = gui.readout(st, q=10.0)
 
     assert got["dice"] == pytest.approx(
         metrics.dice(st["test_vessels"], st["ref_vessels"]))
@@ -309,24 +309,23 @@ def test_readout_matches_direct_metric_calls(slice_2d):
 def test_readout_identical_channels_score_one(slice_2d):
     """Same image in both roles with the same thresholds: Dice must be 1."""
     st, _ = _stages_for_readout(slice_2d)
-    got = gui.readout(st, SPACING_2D, q=10.0)
+    got = gui.readout(st, q=10.0)
     assert got["dice"] == pytest.approx(1.0, abs=1e-6)
     assert got["jaccard"] == pytest.approx(1.0, abs=1e-6)
 
 
 def test_readout_skips_cl_dice_unless_asked(slice_2d):
     st, _ = _stages_for_readout(slice_2d)
-    assert gui.readout(st, SPACING_2D, q=10.0)["cl_dice"] is None
-    assert gui.readout(st, SPACING_2D, q=10.0, include_cl_dice=True)["cl_dice"] \
+    assert gui.readout(st, q=10.0)["cl_dice"] is None
+    assert gui.readout(st, q=10.0, include_cl_dice=True)["cl_dice"] \
         == pytest.approx(1.0, abs=1e-6)
 
 
 def test_readout_flags_an_implausible_area_fraction(slice_2d):
     st, _ = _stages_for_readout(slice_2d)
-    warnings = gui.readout(st, SPACING_2D, q=10.0, plausible=(0.0, 1e-9))["warnings"]
+    warnings = gui.readout(st, q=10.0, plausible=(0.0, 1e-9))["warnings"]
     assert any("ref_af" in w and "plausible" in w for w in warnings)
-    assert not gui.readout(st, SPACING_2D, q=10.0,
-                           plausible=(0.0, 1.0))["warnings"]
+    assert not gui.readout(st, q=10.0, plausible=(0.0, 1.0))["warnings"]
 
 
 def test_readout_single_channel_leaves_pairwise_entries_none(slice_2d):
@@ -334,7 +333,7 @@ def test_readout_single_channel_leaves_pairwise_entries_none(slice_2d):
     st = gui.stages(image, None, SPACING_2D, tissue=roi, sigmas=(1.5, 3.0),
                     reference=2.0, ref_low=0.03, ref_high=0.09, test_low=0.03,
                     test_high=0.09, min_vessel_um2=6.0, virus_k=3.0, q=10.0)
-    got = gui.readout(st, SPACING_2D, q=10.0)
+    got = gui.readout(st, q=10.0)
     assert got["ref_af"] is not None
     for key in ("dice", "precision", "recall", "enrichment", "coverage"):
         assert got[key] is None
@@ -349,7 +348,7 @@ def test_readout_guards_a_tied_percentile_selection(slice_2d):
     st, _ = _stages_for_readout(slice_2d)
     st = dict(st)
     st["ref_top_q"] = st["tissue"].copy()          # 100% selected, nominal q=10
-    assert gui.readout(st, SPACING_2D, q=10.0)["enrichment_q"] is None
+    assert gui.readout(st, q=10.0)["enrichment_q"] is None
 
 
 # --------------------------------------------------------------------------
@@ -472,6 +471,31 @@ def test_batch_csv_name_never_collides(tmp_path):
     second = gui.batch_csv_path(tmp_path, "spinal-cord shipped")
     assert first.name not in existing and second.name not in existing
     assert first != second                       # never overwrites
+
+
+# --------------------------------------------------------------------------
+# import hygiene
+# --------------------------------------------------------------------------
+
+def test_importing_gui_does_not_import_napari_or_magicgui():
+    """`import vessel_utils.gui` must stay free of Qt.
+
+    napari and magicgui are imported inside the functions that need them so the
+    pure half tests without a display server. A stray top-level import would put
+    Qt on every `import vessel_utils.gui`; only a fresh interpreter can catch it,
+    so this runs in a subprocess like test_vessel_utils' import-hygiene checks.
+    """
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, "-c",
+         "import vessel_utils.gui, sys; "
+         "assert not {'napari', 'magicgui'} "
+         "& {k.split('.')[0] for k in sys.modules}, "
+         "sorted(sys.modules)"],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).resolve().parent.parent))
+    assert result.returncode == 0, result.stderr.strip() or result.stdout.strip()
 
 
 # --------------------------------------------------------------------------
