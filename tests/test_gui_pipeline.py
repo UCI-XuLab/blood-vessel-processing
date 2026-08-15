@@ -10,6 +10,8 @@ with exact ground truth, so no lab share is needed. Same reason as
 tests/test_script_helpers.py.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -470,3 +472,27 @@ def test_batch_csv_name_never_collides(tmp_path):
     second = gui.batch_csv_path(tmp_path, "spinal-cord shipped")
     assert first.name not in existing and second.name not in existing
     assert first != second                       # never overwrites
+
+
+# --------------------------------------------------------------------------
+# $BVP_DATA override (independent of the viewer)
+# --------------------------------------------------------------------------
+
+def test_analyse_spinal_cord_data_honours_bvp_data(tmp_path, monkeypatch):
+    """The lab share is not mounted on most machines; the override is the way in."""
+    import importlib
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    monkeypatch.setenv("BVP_DATA", str(tmp_path))
+    module = importlib.reload(importlib.import_module("analyse_spinal_cord"))
+    assert module.DATA == tmp_path
+
+
+def test_analyse_spinal_cord_data_defaults_to_the_share(monkeypatch):
+    """Unset means unchanged behaviour - every existing script must be unaffected."""
+    import importlib
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    monkeypatch.delenv("BVP_DATA", raising=False)
+    module = importlib.reload(importlib.import_module("analyse_spinal_cord"))
+    assert str(module.DATA) == r"Z:\Lab\Eric V\BEC Spinal Cords\composites_EV"

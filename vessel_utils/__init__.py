@@ -9,6 +9,7 @@ better, not to reproduce.
     metrics      Dice, Jaccard, precision, recall, clDice, area fractions
     synth        synthetic vasculature with a simulated lightsheet acquisition
     benchmark    scoring a segmenter against phantoms with known ground truth
+    gui          interactive tuning viewer (needs the `[gui]` extra)
     _vendor      the entropy-guided GrabCut tissue masker, from UCI-XuLab-RegTools
 
 Typical use for comparing two channels::
