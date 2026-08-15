@@ -119,7 +119,7 @@ because there is nothing per-dataset left that is code.
 
 ```python
 PRESETS = {
-    "generic":               dict(spacing=None, roles=(1, 0), mask="percentile",
+    "generic":               dict(spacing=None, roles=(1, 0), mask="otsu",
                                   reference=None, ref_thr=(0.03, 0.09),
                                   test_thr=(0.03, 0.09), min_vessel_um2=6.0,
                                   plausible=(0.0, 1.0)),
@@ -164,11 +164,18 @@ point and both survive.)
 
 A cross-dataset viewer must not weaken that. So:
 
-- A new `vessel_utils.vesselness.reference_lambda(images, sigmas, spacing, masks=None, percentile=99.9)`
-  — the median of per-image `max_eigenvalue` over a sample. Twelve lines, next to the
-  function whose docstring already prescribes the procedure, and unit-testable. It goes in
-  `vessel_utils` rather than the GUI because CLAUDE.md puts active improvements there, and
-  because it is a vesselness concern, not a widget one.
+- A `reference_lambda(images, sigmas, spacing, masks=None, percentile=99.9)` helper — the
+  median of per-image `max_eigenvalue` over a sample. **It lives in `gui.py`, not in
+  `vessel_utils.vesselness`.** An earlier draft put it in the package; #36/#37 make that
+  the wrong call. `vessel_utils/__init__.py`'s own docstring already prescribes the recipe
+  as a one-liner (`max_eigenvalue(calibration_image, sigmas, spacing, percentile=99.9)`),
+  so the wrapper is ~6 lines with exactly one caller — and CLAUDE.md now says outright:
+  *"Do not re-add a module here speculatively — the last round cost ~2,000 lines and three
+  dependencies carrying nothing."* The sin it names for the seven deleted modules was that
+  "every one of their callers was its own test". A one-caller helper added to the library
+  the same week is not worth arguing about; it goes where its caller is, and graduates to
+  `vesselness.py` if a second caller ever appears. This also drops `vessel_utils` from the
+  edited-files list entirely.
 - The GUI computes it **once per (dataset, sigmas)**, displays it, and lets it be edited so
   the calibrated value can be compared against a fixed one — the honest way to handle a
   knob coupled to the thresholds.
@@ -282,40 +289,56 @@ change the conclusion (still an addition, not a rewrite) but it does move the 3D
 different size of job and should be scoped as such. CLAUDE.md's "If whole-brain lightsheet
 work restarts" section carries the non-obvious constraints that layer has to satisfy.
 
+It also means re-adding dependencies, not just code: #37 dropped `zarr`, `dask` and
+`PyWavelets` along with those modules. So 3D is a decision about the project's dependency
+footprint as well as its scope — which is a reason to keep it firmly out of this build
+rather than half-anticipated in it. The per-axis spacing and nD-safe calls above stay,
+because they cost nothing now and are what would otherwise have to be unpicked.
+
 ### Files
 
 | File | Change |
 | --- | --- |
-| `vessel_utils/gui.py` | new, ~320 lines. Imports napari inside the functions that need it, so `import vessel_utils.gui` stays cheap. (#36 replaced the old lazy `__getattr__` re-export with an `__init__.py` that imports *nothing*, and `test_package_init_stays_empty` now pins that — so do not add `gui` to any package-level import list.) |
-| `vessel_utils/vesselness.py` | new `reference_lambda()`, ~12 lines |
-| `pyproject.toml` | `gui = ["napari[all]"]` kept out of `dev` so the test install stays free of Qt and ~45 packages; `[project.scripts] bvp-tune = "vessel_utils.gui:main"` |
-| `scripts/analyse_spinal_cord.py` | one line: `DATA = Path(os.environ.get("BVP_DATA", r"Z:\..."))`. Separable from the GUI and worth it independently — that hardcoded share breaks all eight scripts importing from this module for any lab member without `Z:` mounted. Behaviour unchanged when unset. |
-| `tests/test_gui_pipeline.py` | new |
+| `vessel_utils/gui.py` | new, ~330 lines. Imports napari inside the functions that need it, so `import vessel_utils.gui` stays cheap. (#36 replaced the old lazy `__getattr__` re-export with an `__init__.py` that imports *nothing*, and `test_package_init_stays_empty` now pins that — so do not add `gui` to any package-level import list.) |
+| `vessel_utils/__init__.py` | one line in the **docstring** module list: `gui  interactive tuning viewer (needs the [gui] extra)`. A docstring edit, so `test_package_init_stays_empty` is unaffected. |
+| `CLAUDE.md` | a row in the `vessel_utils` table, marked as the one module that is an application rather than a pipeline stage. Required, not optional: #37 added *"Do not re-add a module here speculatively"* immediately after deleting seven modules, so a new module landing there undocumented is precisely the drift that rule exists to catch. |
+| `pyproject.toml` | `gui = ["napari[all]"]` kept out of `dev` so the test install stays free of Qt and ~45 packages; `[project.scripts] bvp-tune = "vessel_utils.gui:main"`. No version bump — this adds an extra and an entry point without changing the 2.0.0 API surface. |
+| `scripts/analyse_spinal_cord.py` | one line: `DATA = Path(os.environ.get("BVP_DATA", r"Z:\..."))`. Separable from the GUI and worth it independently — that hardcoded share breaks all seven scripts routing through this module for any lab member without `Z:` mounted. Behaviour unchanged when unset. |
+| `tests/test_gui_pipeline.py` | new, following the convention `tests/test_script_helpers.py` established in #36: cover only what runs without the lab share. |
 
 **Nothing that produced a published number is modified.** Driving `vessel_utils` directly
 means the GUI needs neither `dice_between_channels.channel_masks` nor a split of
 `analyse_spinal_cord.analyse`, both of which earlier drafts of this design called for.
 
-The tissue-mask dropdown reuses existing implementations rather than adding a fourth:
-`grabcut` → `vessel_utils._vendor.compute_entropy_grabcut`, `brain` →
+The tissue-mask dropdown reuses existing implementations rather than adding one:
+`otsu` → `vessel_utils.threshold.otsu_threshold`, `grabcut` →
+`vessel_utils._vendor.compute_entropy_grabcut`, `brain` →
 `velazquez_rivera_2025.vessels.get_brain_mask`, plus `none`. The `brain` option is labelled
 **8-bit input** in the UI: it calls `cv2.threshold(..., THRESH_TRIANGLE)`, which does not
 accept uint16 or float, so on 16-bit microscopy it must be given a converted copy.
 Importing the frozen archive from the active package is a read-only import and does not
 touch the freeze; it beats duplicating four lines.
 
-**The `percentile` option is dropped** (this draft had four). It pointed at
-`vessel_utils.correct.tissue_mask`, which was deleted in #37 as uncalled, so keeping it
-would mean writing a fresh crude masker — the fifth implementation this paragraph exists
-to avoid, and a re-add of exactly what was just removed. `grabcut` is what the shipped
-pipeline actually uses, which is the operating point this viewer exists to tune.
+**The `percentile` option is dropped, and `otsu` replaces it.** `percentile` pointed at
+`vessel_utils.correct.tissue_mask`, deleted in #37 as uncalled, so keeping it would mean
+writing a fresh crude masker — an extra implementation, and a re-add of exactly what was
+just removed. But dropping to `grabcut`/`brain`/`none` alone would leave the viewer without
+a **fast, dtype-agnostic** masker, and that is not survivable for the generalized case:
+GrabCut is 7–15 s per section, `brain` needs 8-bit input, and a dataset the batch scripts
+have never touched has no warm cache — so every file change in the combobox would stall for
+GrabCut. `otsu_threshold` closes that with no new algorithm: it already exists, already
+guards the constant and empty cases, and Otsu on a raw channel is exactly the crude
+tissue-versus-background split wanted here. It is the sensible default for the `generic`
+preset; `grabcut` stays the default for the spinal-cord presets, since it is what produced
+the shipped segmentations.
 
-If `percentile` was really there for *speed* — GrabCut being the slow step in an
-interactive loop — the cheaper fix is to reuse the pipeline's existing cache rather than a
-second algorithm: `analyse_spinal_cord.tissue_mask` already content-addresses its masks by
-a blake2b of the channel sum under `results/tissue_masks/`, so a section the batch scripts
-have seen masks instantly. Recover the deleted implementation with
-`git show 52abb9f^:vessel_utils/correct.py` if this reasoning is wrong.
+For the spinal-cord presets the cache is the reason GrabCut stays interactive:
+`analyse_spinal_cord.tissue_mask` content-addresses its masks by a blake2b of the channel
+sum under `results/tissue_masks/`, so any section the batch scripts have already seen masks
+instantly. The GUI computes GrabCut itself via `_vendor` rather than importing that
+function — a package must not import from `scripts/` — and reads and writes the same cache
+directory and key, so the two share their work. Recover the deleted percentile masker with
+`git show 52abb9f^:vessel_utils/correct.py` if this reasoning turns out wrong.
 
 ## Error handling
 
@@ -327,6 +350,15 @@ have seen masks instantly. Recover the deleted implementation with
   `ImportError` traceback.
 - No readable images in the source directory: exit naming the directory and the patterns
   tried.
+- **A file whose channel count does not cover the selected role indices is flagged in the
+  combobox and refuses to load, never silently re-indexed.** Globbing a directory
+  reintroduces a hazard the spinal-cord curation handles today and the generic case must
+  not lose: `curated_paths` excludes files with more than two channels outright rather than
+  taking the first two, because "the extra-channel files have not been curated yet, so
+  which two are green and CD31 is not established, and guessing would silently compare the
+  wrong pair". A viewer that quietly fell back to `[0]` and `[1]` would produce a
+  confident, wrong Dice. Counts are read from the TIFF header without decoding, the way
+  `channel_count` already does it.
 - Spacing absent from the TIFF tags: fall back to 1.0 and flag the field, rather than
   silently proceeding — with sigmas in µm, a wrong spacing silently searches the wrong
   vessel calibres.
@@ -336,20 +368,26 @@ have seen masks instantly. Recover the deleted implementation with
 ## Testing
 
 The GUI's own widget plumbing is exercised by a human on every launch and does not need a
-test that needs a display server. What needs testing is the pipeline wiring and the one new
-library function — and both can be tested with **no data and no Qt**, because
+test that needs a display server. What needs testing is the pipeline wiring and the
+`reference_lambda` helper — and both can be tested with **no data and no Qt**, because
 `vessel_utils.synth.phantom(shape, spacing, seed)` returns a simulated acquisition with its
-exact ground-truth mask.
+exact ground-truth mask. This follows `tests/test_script_helpers.py` from #36, which covers
+only the helpers reachable without the lab share, for the same reason.
 
 - **`tests/test_gui_pipeline.py`** — on a 2D slice of `phantom()`: build every layer,
   assert shapes, dtypes and that each mask is a subset of the tissue mask; assert the
   readout equals direct `vessel_utils.metrics` calls on the same arrays; assert the
   phantom's Dice against its known ground truth clears a floor, which catches a pipeline
   wired together wrongly rather than merely running. Seeded, so it is deterministic.
-- **`reference_lambda`** — on several phantoms: the result is the median of the
-  per-image values, is invariant to input order, and is unchanged by appending a duplicate
-  image. That last one is the property that matters: it is what makes the value a dataset
-  constant rather than a sample artefact.
+- **`reference_lambda`** (imported from `vessel_utils.gui`, where it now lives) — on
+  several phantoms: the result is the median of the per-image values, is invariant to input
+  order, and is unchanged by appending a duplicate image. That last one is the property
+  that matters: it is what makes the value a dataset constant rather than a sample
+  artefact.
+- **The channel-count guard** — a synthetic 1- and 3-channel TIFF written to `tmp_path`:
+  selecting role indices the file cannot supply must raise, not fall back to `[0]`/`[1]`.
+  Cheap, needs no real data, and pins the one failure that would produce a confident wrong
+  number rather than a visible error.
 - **`python -m vessel_utils.gui --selftest`** — the same wiring check as a runnable
   command, so the check exists where someone debugging the GUI will find it.
 - **No regression check needed on the existing scripts**, because none of their behaviour
