@@ -421,3 +421,52 @@ def test_response_rejects_unhashable_arguments(tmp_path):
 
 def test_selftest_passes():
     gui.selftest()
+
+
+# --------------------------------------------------------------------------
+# batch
+# --------------------------------------------------------------------------
+
+def _two_channel_dir(tmp_path, n=3):
+    paths = []
+    for i in range(n):
+        stack = np.zeros((2, 48, 48), dtype=np.uint16)
+        stack[:, 18 + i:26 + i, 6:42] = 5000
+        paths.append(_write(tmp_path / f"s{i}.tif", stack))
+    return paths
+
+
+BATCH_PARAMS = dict(mask="none", sigmas=(1.5, 3.0), reference=2.0, ref_low=0.03,
+                    ref_high=0.09, test_low=0.03, test_high=0.09,
+                    min_vessel_um2=6.0, virus_k=3.0, q=10.0, cl_dice=False,
+                    spacing=(0.75, 0.75))
+
+
+def test_batch_rows_one_row_per_file(tmp_path):
+    paths = _two_channel_dir(tmp_path)
+    rows, failures = gui.batch_rows(paths, gui.PRESETS["generic"], BATCH_PARAMS)
+    assert len(rows) == 3 and not failures
+    assert rows[0]["file"] == "s0.tif"
+    for key in ("ref_af", "dice", "precision", "recall"):
+        assert key in rows[0]
+
+
+def test_batch_rows_collects_failures_instead_of_raising(tmp_path):
+    paths = _two_channel_dir(tmp_path, n=2)
+    broken = _write(tmp_path / "solo.tif", np.zeros((16, 16), dtype=np.uint16))
+    rows, failures = gui.batch_rows(paths + [broken], gui.PRESETS["generic"],
+                                   BATCH_PARAMS)
+    assert len(rows) == 2
+    assert len(failures) == 1 and "solo.tif" in failures[0]
+
+
+def test_batch_csv_name_never_collides(tmp_path):
+    existing = {"spinal_cord_specificity.csv", "dice_between_channels_full.csv",
+                "dice_between_channels_pilot.csv"}
+    for name in existing:
+        (tmp_path / name).write_text("x")
+    first = gui.batch_csv_path(tmp_path, "spinal-cord shipped")
+    first.write_text("x")
+    second = gui.batch_csv_path(tmp_path, "spinal-cord shipped")
+    assert first.name not in existing and second.name not in existing
+    assert first != second                       # never overwrites

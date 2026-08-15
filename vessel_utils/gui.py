@@ -23,7 +23,7 @@ from vessel_utils.vesselness import jerman_vesselness
 
 __all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask",
            "find_images", "channel_count", "read_spacing", "read_channels", "readout",
-           "PRESETS", "load", "response", "selftest",
+           "PRESETS", "load", "response", "selftest", "batch_rows", "batch_csv_path",
            "LAYERS", "build_viewer", "main"]
 
 
@@ -493,6 +493,52 @@ def selftest():
           f"ref_af {got['ref_af']:.4f}, dice {got['dice']:.4f}")
 
 
+def batch_rows(paths, preset, params):
+    """Apply the current parameters to every file. Returns (rows, failures).
+
+    Failures are collected, not raised: one unreadable file must not abandon the
+    other sixty. Same contract as the batch scripts' SKIP lines.
+    """
+    roles, rows, failures = preset["roles"], [], []
+    for path in paths:
+        try:
+            channels, tissue = load(path, params["mask"], roles)
+            st = stages(channels[0], channels[1] if len(channels) > 1 else None,
+                        params["spacing"], tissue=tissue, sigmas=params["sigmas"],
+                        reference=params["reference"], ref_low=params["ref_low"],
+                        ref_high=params["ref_high"], test_low=params["test_low"],
+                        test_high=params["test_high"],
+                        min_vessel_um2=params["min_vessel_um2"],
+                        virus_k=params["virus_k"], q=params["q"])
+            numbers = readout(st, params["spacing"], q=params["q"],
+                              plausible=preset["plausible"],
+                              include_cl_dice=params["cl_dice"])
+        except Exception as error:                          # noqa: BLE001
+            failures.append(f"{Path(path).name}: {error}")
+            continue
+        warnings = numbers.pop("warnings")
+        rows.append({"file": Path(path).name, **numbers,
+                     "warnings": " | ".join(warnings)})
+    return rows, failures
+
+
+def batch_csv_path(directory, preset_name):
+    """A filename that cannot collide with a published result CSV, ever.
+
+    `tuned_` prefix plus the preset plus a counter. The published CSVs are
+    spinal_cord_specificity.csv, dice_between_channels_{full,pilot}.csv and
+    enrichment_cd31_percentile_*.csv; none starts with `tuned_`. The counter means
+    a second run does not overwrite the first, so two operating points can be
+    compared afterwards.
+    """
+    slug = preset_name.replace(" ", "-")
+    directory = Path(directory)
+    index = 1
+    while (directory / f"tuned_{slug}_{index:02d}.csv").exists():
+        index += 1
+    return directory / f"tuned_{slug}_{index:02d}.csv"
+
+
 # ---------------------------------------------------------------------------
 # The interactive half. napari and magicgui are imported inside the functions
 # below, never at module top level, so `import vessel_utils.gui` stays free of
@@ -518,9 +564,42 @@ def _spacing_tuple(value, ndim=2):
 
 
 def run_all(viewer, state, panel, preset):
-    """Batch every file to a CSV. Placeholder until Task 8 wires the real one."""
-    # ponytail: Task 8 replaces this stub with the actual batch-to-CSV run.
-    print("batch not yet wired")
+    """The Run-all button: batch every file at the parameters currently on screen.
+
+    mask/sigmas/reference come from `state["committed"]` - what the displayed
+    responses were actually computed at - not the live widgets, which may have
+    been edited since the last Recompute and not yet paid for. The threshold and
+    percentile params are cheap and live-wired, so those are read straight off
+    the panel: that is the whole point of a slider.
+    """
+    committed = state.get("committed")
+    if committed is None:
+        print("nothing committed yet - press Recompute first")
+        return
+    params = dict(committed)                            # sigmas, reference, mask
+    for name in ("ref_low", "ref_high", "test_low", "test_high",
+                 "min_vessel_um2", "virus_k", "q", "cl_dice"):
+        params[name] = panel[name].value
+    # batch_rows takes one spacing for the whole run; a curated dataset shares
+    # spacing across files, so the currently-displayed file's resolved spacing
+    # (kept live in state["spacing"] by refresh) stands in for all of them.
+    params["spacing"] = state["spacing"]
+
+    rows, failures = batch_rows(state["paths"], preset, params)
+    if not rows:
+        print("no file produced a row; nothing written")
+        for failure in failures:
+            print(f"  SKIP {failure}")
+        return
+    import csv
+    out = batch_csv_path(Path(state["paths"][0]).parent, state["preset"])
+    with open(out, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"wrote {out}  ({len(rows)} rows, {len(failures)} skipped)")
+    for failure in failures:
+        print(f"  SKIP {failure}")
 
 
 def build_viewer(directory, preset_name="generic", show=True):
@@ -655,6 +734,7 @@ def build_viewer(directory, preset_name="generic", show=True):
             # resolve_spacing opens the file, so a corrupt header must be caught
             # here too - selecting a bad file must show FAILED, not propagate.
             spacing = resolve_spacing(values["file"])
+            state["spacing"] = spacing          # so run_all batches at the spacing
             channels, tissue = load(values["file"], mask, roles)
             # Compute the vesselness through the cache, so a threshold-only change
             # is a cache hit (instant) and stages re-thresholds in ~0.3s rather
