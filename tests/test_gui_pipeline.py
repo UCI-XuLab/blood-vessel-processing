@@ -274,3 +274,77 @@ def test_read_spacing_from_tags(tmp_path):
 def test_read_spacing_returns_none_when_absent(tmp_path):
     path = _write(tmp_path / "raw.tif", np.zeros((16, 16), dtype=np.uint16))
     assert gui.read_spacing(path) is None
+
+
+# --------------------------------------------------------------------------
+# readout
+# --------------------------------------------------------------------------
+
+def _stages_for_readout(slice_2d, **overrides):
+    image, _, roi = slice_2d
+    kwargs = dict(tissue=roi, sigmas=(1.5, 3.0), reference=2.0, ref_low=0.03,
+                  ref_high=0.09, test_low=0.03, test_high=0.09,
+                  min_vessel_um2=6.0, virus_k=3.0, q=10.0)
+    kwargs.update(overrides)
+    return gui.stages(image, image, SPACING_2D, **kwargs), kwargs
+
+
+def test_readout_matches_direct_metric_calls(slice_2d):
+    from vessel_utils import metrics
+    st, _ = _stages_for_readout(slice_2d)
+    got = gui.readout(st, SPACING_2D, q=10.0)
+
+    assert got["dice"] == pytest.approx(
+        metrics.dice(st["test_vessels"], st["ref_vessels"]))
+    assert got["precision"] == pytest.approx(
+        metrics.precision(st["test_vessels"], st["ref_vessels"]))
+    assert got["recall"] == pytest.approx(
+        metrics.recall(st["test_vessels"], st["ref_vessels"]))
+    assert got["ref_af"] == pytest.approx(
+        metrics.area_fraction(st["ref_vessels"], st["tissue"]))
+
+
+def test_readout_identical_channels_score_one(slice_2d):
+    """Same image in both roles with the same thresholds: Dice must be 1."""
+    st, _ = _stages_for_readout(slice_2d)
+    got = gui.readout(st, SPACING_2D, q=10.0)
+    assert got["dice"] == pytest.approx(1.0, abs=1e-6)
+    assert got["jaccard"] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_readout_skips_cl_dice_unless_asked(slice_2d):
+    st, _ = _stages_for_readout(slice_2d)
+    assert gui.readout(st, SPACING_2D, q=10.0)["cl_dice"] is None
+    assert gui.readout(st, SPACING_2D, q=10.0, include_cl_dice=True)["cl_dice"] \
+        == pytest.approx(1.0, abs=1e-6)
+
+
+def test_readout_flags_an_implausible_area_fraction(slice_2d):
+    st, _ = _stages_for_readout(slice_2d)
+    warnings = gui.readout(st, SPACING_2D, q=10.0, plausible=(0.0, 1e-9))["warnings"]
+    assert any("ref_af" in w and "plausible" in w for w in warnings)
+    assert not gui.readout(st, SPACING_2D, q=10.0,
+                           plausible=(0.0, 1.0))["warnings"]
+
+
+def test_readout_single_channel_leaves_pairwise_entries_none(slice_2d):
+    image, _, roi = slice_2d
+    st = gui.stages(image, None, SPACING_2D, tissue=roi, sigmas=(1.5, 3.0),
+                    reference=2.0, ref_low=0.03, ref_high=0.09, test_low=0.03,
+                    test_high=0.09, min_vessel_um2=6.0, virus_k=3.0, q=10.0)
+    got = gui.readout(st, SPACING_2D, q=10.0)
+    assert got["ref_af"] is not None
+    for key in ("dice", "precision", "recall", "enrichment", "coverage"):
+        assert got[key] is None
+
+
+def test_readout_guards_a_tied_percentile_selection(slice_2d):
+    """A plateau of repeated values can select far more than q% of the tissue.
+
+    That silently collapses several q onto one selection and fakes stability
+    across q, so it must read as absent rather than as a number.
+    """
+    st, _ = _stages_for_readout(slice_2d)
+    st = dict(st)
+    st["ref_top_q"] = st["tissue"].copy()          # 100% selected, nominal q=10
+    assert gui.readout(st, SPACING_2D, q=10.0)["enrichment_q"] is None

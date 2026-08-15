@@ -21,7 +21,8 @@ from vessel_utils.threshold import segment
 from vessel_utils.vesselness import jerman_vesselness
 
 __all__ = ["normalise", "reference_lambda", "stages", "MASK_METHODS", "tissue_mask",
-           "find_images", "channel_count", "read_spacing", "read_channels", "main"]
+           "find_images", "channel_count", "read_spacing", "read_channels", "readout",
+           "main"]
 
 
 def normalise(channel, roi):
@@ -165,6 +166,7 @@ def stages(ref, test, spacing, *, tissue, sigmas, reference, ref_low, ref_high,
         out["test_positive"] = (np.asarray(test) > out["cut"]) & tissue
     else:
         out["test_positive"] = np.zeros_like(tissue)
+    out["test_intensity"] = np.asarray(test, dtype=np.float32)
     return out
 
 
@@ -315,3 +317,88 @@ def read_channels(path, roles):
     def plane(index):
         return np.asarray(stack if count == 1 else stack[index], dtype=np.float32)
     return plane(roles[0]), (None if roles[1] is None else plane(roles[1]))
+
+
+TIE_TOLERANCE = 1.5     # achieved/nominal above this means the cutoff had ties
+
+
+def _ratio(values_in, values_out):
+    """Mean inside over mean outside, or None if either side is empty."""
+    if not values_in.size or not values_out.size:
+        return None
+    outside = float(values_out.mean())
+    return None if outside == 0 else float(values_in.mean() / outside)
+
+
+def readout(st, spacing, *, q, plausible=(0.0, 1.0), include_cl_dice=False):
+    """The numbers that go beside the picture.
+
+    Argument order for the asymmetric metrics is fixed: `precision(test, ref)`
+    asks how much of the TEST mask sits on a reference vessel, `recall(test, ref)`
+    how much of the reference the test covers. Swapping them silently reports the
+    other question.
+
+    `cl_dice` is optional because it skeletonises, which is the one metric here
+    that is not free at slider rates.
+    """
+    from vessel_utils import metrics
+
+    tissue, ref_vessels = st["tissue"], st["ref_vessels"]
+    out = {key: None for key in
+           ("test_af", "dice", "jaccard", "precision", "recall", "cl_dice",
+            "enrichment", "coverage", "off_target", "enrichment_q")}
+    out["ref_af"] = metrics.area_fraction(ref_vessels, tissue)
+    out["cut"] = st["cut"]
+    warnings = []
+
+    low, high = plausible
+    if not low <= out["ref_af"] <= high:
+        warnings.append(
+            f"ref_af {out['ref_af']:.4f} is outside the plausible band "
+            f"({low}-{high}) - check the response is graded, not saturated")
+
+    test_vessels = st["test_vessels"]
+    if test_vessels is not None:
+        out["test_af"] = metrics.area_fraction(test_vessels, tissue)
+        out["dice"] = metrics.dice(test_vessels, ref_vessels)
+        out["jaccard"] = metrics.jaccard(test_vessels, ref_vessels)
+        out["precision"] = metrics.precision(test_vessels, ref_vessels)
+        out["recall"] = metrics.recall(test_vessels, ref_vessels)
+        if include_cl_dice:
+            out["cl_dice"] = metrics.cl_dice(test_vessels, ref_vessels)
+
+    return _add_intensity_measures(out, st, q, warnings)
+
+
+def _add_intensity_measures(out, st, q, warnings):
+    """Enrichment, coverage, off-target, and the percentile enrichment."""
+    tissue, ref_vessels = st["tissue"], st["ref_vessels"]
+    test_positive = st["test_positive"]
+    if test_positive is None:
+        out["warnings"] = warnings
+        return out
+
+    test = st.get("test_intensity")
+    if test is not None:
+        parenchyma = tissue & ~ref_vessels
+        out["enrichment"] = _ratio(test[ref_vessels], test[parenchyma])
+        # Nominal q against what was actually selected. A plateau of repeated
+        # values at the cutoff selects far more than q%, which would otherwise
+        # read as a real number.
+        top_q, selected = st["ref_top_q"], float(st["ref_top_q"].sum())
+        achieved = selected / max(float(tissue.sum()), 1.0)
+        if achieved <= TIE_TOLERANCE * (q / 100.0):
+            out["enrichment_q"] = _ratio(test[top_q], test[tissue & ~top_q])
+        else:
+            warnings.append(
+                f"top-{q:g}% selected {achieved * 100:.1f}% of tissue - ties at the "
+                f"cutoff, so enrichment_q is not reported")
+
+    vessel_area = float(ref_vessels.sum())
+    positive_area = float(test_positive.sum())
+    if vessel_area:
+        out["coverage"] = float((test_positive & ref_vessels).sum() / vessel_area)
+    if positive_area:
+        out["off_target"] = float((test_positive & ~ref_vessels).sum() / positive_area)
+    out["warnings"] = warnings
+    return out
