@@ -18,7 +18,7 @@ import numpy as np
 from vessel_utils.threshold import segment
 from vessel_utils.vesselness import jerman_vesselness
 
-__all__ = ["normalise", "stages", "main"]
+__all__ = ["normalise", "reference_lambda", "stages", "main"]
 
 
 def normalise(channel, roi):
@@ -41,6 +41,44 @@ def normalise(channel, roi):
     channel = np.asarray(channel, dtype=np.float32)
     low, high = np.percentile(channel[np.asarray(roi, dtype=bool)], [50, 99])
     return np.clip((channel - low) / max(high - low, 1e-6), 0, None).astype(np.float32)
+
+
+from vessel_utils.vesselness import max_eigenvalue
+
+
+def reference_lambda(images, spacing, sigmas, masks=None, percentile=99.9):
+    """One tau reference for a whole dataset, not one per image.
+
+    This is the point of `jerman_vesselness(reference_lambda=...)`. Computed per
+    image, the response is regularised against that image's own maximum
+    eigenvalue, so a fixed threshold means a different thing in every image - and
+    the comparison a viewer exists to support is precisely across images. A
+    brighter section would get a systematically different vessel criterion from a
+    dimmer one, and any difference under test would be partly an artefact of the
+    calibration.
+
+    The median across the sample, not the mean, and a high quantile within each
+    image rather than its maximum: the maximum is an extreme-value statistic set
+    by one bright structure, and it varied fourfold between sections of the same
+    spinal cord.
+
+    Args:
+        images: a representative sample. Sample across whatever the dataset varies
+            in - region, animal, staining run - so the reference is not set by one
+            anatomy.
+        masks: optional per-image ROI. Background has no structure and only
+            dilutes the quantile.
+    """
+    if not len(images):
+        raise ValueError("no images to calibrate from")
+    masks = masks if masks is not None else [None] * len(images)
+    values = []
+    for image, mask in zip(images, masks):
+        roi = np.ones(np.shape(image), dtype=bool) if mask is None else \
+            np.asarray(mask, dtype=bool)
+        values.append(max_eigenvalue(normalise(image, roi), list(sigmas), spacing,
+                                     percentile=percentile, mask=roi))
+    return float(np.median(values))
 
 
 def _min_size_pixels(min_vessel_um2, spacing):

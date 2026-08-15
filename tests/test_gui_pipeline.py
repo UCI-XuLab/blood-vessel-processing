@@ -82,3 +82,60 @@ def test_min_vessel_is_physical_not_pixels(slice_2d):
     coarse = gui.stages(image, None, (2.0, 2.0), **common)["ref_vessels"]
     # Not an equality claim - just that spacing reaches the size filter at all.
     assert fine.sum() != coarse.sum()
+
+
+# --------------------------------------------------------------------------
+# reference_lambda
+# --------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def three_slices():
+    """Three 2D slices from different phantoms - a miniature 'dataset'."""
+    out = []
+    for seed in (1, 2, 3):
+        volume, truth, _ = phantom(shape=(12, 96, 96), spacing=(3.0, 0.75, 0.75),
+                                   seed=seed)
+        index = int(np.argmax(truth.reshape(truth.shape[0], -1).sum(axis=1)))
+        out.append(volume[index].astype(np.float32))
+    return out
+
+
+def test_reference_lambda_is_the_median_of_its_sample(three_slices):
+    from vessel_utils.vesselness import max_eigenvalue
+    sigmas, spacing = (1.5, 3.0), (0.75, 0.75)
+    masks = [np.ones(i.shape, dtype=bool) for i in three_slices]
+
+    each = [max_eigenvalue(gui.normalise(i, m), list(sigmas), spacing,
+                           percentile=99.9, mask=m)
+            for i, m in zip(three_slices, masks)]
+    got = gui.reference_lambda(three_slices, spacing, sigmas, masks=masks)
+
+    assert got == pytest.approx(float(np.median(each)))
+
+
+def test_reference_lambda_ignores_order(three_slices):
+    sigmas, spacing = (1.5, 3.0), (0.75, 0.75)
+    forward = gui.reference_lambda(three_slices, spacing, sigmas)
+    backward = gui.reference_lambda(list(reversed(three_slices)), spacing, sigmas)
+    assert forward == pytest.approx(backward)
+
+
+def test_reference_lambda_survives_a_duplicated_image(three_slices):
+    """The property that makes it a dataset constant, not a sample artefact.
+
+    A median over an odd sample and the same sample plus one duplicate of its
+    middle element is unchanged. If this breaks, the statistic is tracking which
+    files happened to be sampled.
+    """
+    sigmas, spacing = (1.5, 3.0), (0.75, 0.75)
+    base = gui.reference_lambda(three_slices, spacing, sigmas)
+    each = sorted(gui.reference_lambda([i], spacing, sigmas) for i in three_slices)
+    middle = next(i for i in three_slices
+                  if gui.reference_lambda([i], spacing, sigmas) == pytest.approx(each[1]))
+    assert gui.reference_lambda(three_slices + [middle], spacing, sigmas) \
+        == pytest.approx(base)
+
+
+def test_reference_lambda_rejects_an_empty_sample():
+    with pytest.raises(ValueError, match="no images"):
+        gui.reference_lambda([], (0.75, 0.75), (1.5, 3.0))
