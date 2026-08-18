@@ -35,6 +35,12 @@ dev = [
     "ipykernel",
     "tqdm",         # the archive notebooks' batch loops; no .py imports it
 ]
+# The interactive tuning viewer. Deliberately not in `dev`: napari pulls PyQt6 and
+# about 45 packages, and neither the tests nor the notebooks need any of it.
+gui = ["napari[all]"]
+
+[project.scripts]
+bvp-tune = "vessel_utils.gui:main"
 
 [tool.setuptools]
 packages = ["velazquez_rivera_2025", "vessel_utils", "vessel_utils._vendor"]

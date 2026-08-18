@@ -44,6 +44,7 @@ Artefact handling:
 
 import csv
 import hashlib
+import os
 import re
 import sys
 from collections import defaultdict
@@ -60,7 +61,10 @@ from vessel_utils._vendor import compute_entropy_grabcut, EntropyGrabCutConfig  
 from vessel_utils.threshold import segment                         # noqa: E402
 from vessel_utils.vesselness import jerman_vesselness, max_eigenvalue  # noqa: E402
 
-DATA = Path(r"Z:\Lab\Eric V\BEC Spinal Cords\composites_EV")
+# Overridable because the share is not mounted on most machines, and the seven
+# scripts that route through this module are all unusable without it. Unset means
+# the lab path, so nothing changes for anyone who has Z:.
+DATA = Path(os.environ.get("BVP_DATA", r"Z:\Lab\Eric V\BEC Spinal Cords\composites_EV"))
 UM_PER_PX = 0.650193          # from the calibrated files; identical in all 34 of them
 SIGMAS = [1.5, 3.0, 6.0, 12.0]   # um, capillary through venule radius
 # Hysteresis with a WIDE gap. The seed (high) sits on confident vessel; the grow
